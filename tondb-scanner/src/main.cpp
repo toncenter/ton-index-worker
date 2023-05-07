@@ -12,7 +12,7 @@
 
 
 int main(int argc, char *argv[]) {
-  SET_VERBOSITY_LEVEL(verbosity_INFO);
+  SET_VERBOSITY_LEVEL(verbosity_DEBUG);
   td::set_default_failure_signal_handler().ensure();
 
   CHECK(vm::init_op_cp0());

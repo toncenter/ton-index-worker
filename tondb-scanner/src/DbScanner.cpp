@@ -285,6 +285,7 @@ void DbScanner::start_up() {
 
 void DbScanner::run() {
   db_ = td::actor::create_actor<ton::validator::RootDb>("db", td::actor::ActorId<ton::validator::ValidatorManager>(), db_root_);
+  event_processor_ = td::actor::create_actor<EventProcessor>("event_processor");
 }
 
 void DbScanner::update_last_mc_seqno() {
@@ -354,6 +355,15 @@ void DbScanner::seqno_parsed(int mc_seqno, td::Result<ParsedBlock> parsed_block)
     return;
   }
 
+  auto R = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno, parsed_block = parsed_block.ok_ref()](td::Result<td::Unit> res) {
+    LOG(INFO) << "Int detector finished";
+    td::actor::send_closure(SelfId, &DbScanner::interfaces_processed, mc_seqno, std::move(parsed_block));
+  });
+
+  td::actor::send_closure(event_processor_, &EventProcessor::process, parsed_block.ok_ref(), std::move(R));
+}
+
+void DbScanner::interfaces_processed(int mc_seqno, ParsedBlock parsed_block) {
   auto R = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<td::Unit> res) {
     if (res.is_ok()) {
       LOG(DEBUG) << "MC seqno " << mc_seqno << " insert success";
@@ -363,7 +373,7 @@ void DbScanner::seqno_parsed(int mc_seqno, td::Result<ParsedBlock> parsed_block)
     }
   });
 
-  td::actor::send_closure(insert_manager_, &InsertManagerInterface::insert, parsed_block.move_as_ok(), std::move(R));
+  td::actor::send_closure(insert_manager_, &InsertManagerInterface::insert, parsed_block, std::move(R));
 }
 
 void DbScanner::reschedule_seqno(int mc_seqno) {
