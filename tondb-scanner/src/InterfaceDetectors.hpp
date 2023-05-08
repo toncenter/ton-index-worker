@@ -44,15 +44,16 @@ public:
 
 
 
-struct JettonContent {
+// struct JettonContent {
 
-};
+// };
 
 struct JettonMasterData {
+  std::string address;
   uint64_t total_supply;
   bool mintable;
-  std::string admin_address;
-  JettonContent jetton_content;
+  td::optional<std::string> admin_address;
+  // JettonContent jetton_content;
   vm::CellHash jetton_wallet_code_hash;
   vm::CellHash data_hash;
   vm::CellHash code_hash;
@@ -133,13 +134,11 @@ public:
     }
 
     JettonMasterData data;
+    data.address = convert::to_raw_address(address);
     data.total_supply = stack[0].as_int()->to_long();
     data.mintable = stack[1].as_int()->to_long() != 0;
     auto admin_address = convert::to_raw_address(stack[2].as_slice());
-    if (admin_address.is_error()) {
-      // some jettons set unparsable address as admin address to revoke ownership (some others set it to zero)
-      data.admin_address = "";
-    } else {
+    if (admin_address.is_ok()) { // some jettons set unparsable address as admin address to revoke ownership (some others set it to zero address)
       data.admin_address = admin_address.move_as_ok();
     }
     data.last_transaction_lt = last_tx_lt;

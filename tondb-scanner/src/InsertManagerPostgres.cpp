@@ -320,6 +320,189 @@ public:
   }
 };
 
+
+class GetJettonWallet : public td::actor::Actor {
+private:
+  std::string connection_string_;
+  std::string address_;
+  td::Promise<JettonWalletData> promise_;
+public:
+  GetJettonWallet(std::string connection_string, std::string address, td::Promise<JettonWalletData> promise)
+    : connection_string_(std::move(connection_string))
+    , address_(std::move(address))
+    , promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created GetJettonWallet";
+  }
+
+  void start_up() override {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error("Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+
+      std::string query = "SELECT balance, address, owner, jetton, last_transaction_lt, code_hash, data_hash "
+                          "FROM jetton_wallets "
+                          "WHERE address = $1;";
+
+      pqxx::result result = txn.exec_params(query, address_);
+
+      if (result.size() != 1) {
+        if (result.size() == 0) {
+          promise_.set_error(td::Status::Error(PSLICE() << "Jetton Wallet for address " << address_ << " not found"));
+        } else {
+          promise_.set_error(td::Status::Error(PSLICE() << "Jetton Wallet for address " << address_ << " is not unique (found " << result.size() << " wallets)"));
+        }
+        stop();
+        return;
+      }
+
+      const auto& row = result[0];
+      
+      JettonWalletData wallet;
+      wallet.balance = row[0].as<uint64_t>();
+      wallet.address = row[1].as<std::string>();
+      wallet.owner = row[2].as<std::string>();
+      wallet.jetton = row[3].as<std::string>();
+      wallet.last_transaction_lt = row[4].as<uint64_t>();
+      wallet.code_hash = vm::CellHash::from_slice(td::base64_decode(row[5].as<std::string>()).move_as_ok());
+      wallet.data_hash = vm::CellHash::from_slice(td::base64_decode(row[6].as<std::string>()).move_as_ok());
+
+      txn.commit();
+      promise_.set_value(std::move(wallet));
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(PSLICE() << "Error retrieving wallet from PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
+class UpsertJettonMaster : public td::actor::Actor {
+private:
+  std::string connection_string_;
+  JettonMasterData master_data_;
+  td::Promise<td::Unit> promise_;
+public:
+  UpsertJettonMaster(std::string connection_string, JettonMasterData master_data, td::Promise<td::Unit> promise)
+    : connection_string_(std::move(connection_string))
+    , master_data_(std::move(master_data))
+    , promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created UpsertJettonMaster";
+  }
+
+  void start_up() override {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error("Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+
+      std::string query = "INSERT INTO jetton_masters "
+                          "(address, total_supply, mintable, admin_address, jetton_wallet_code_hash, data_hash, code_hash, last_transaction_lt, code_boc, data_boc) "
+                          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
+                          "ON CONFLICT (address) "
+                          "DO UPDATE SET "
+                          "total_supply = EXCLUDED.total_supply, "
+                          "mintable = EXCLUDED.mintable, "
+                          "admin_address = EXCLUDED.admin_address, "
+                          "jetton_wallet_code_hash = EXCLUDED.jetton_wallet_code_hash, "
+                          "data_hash = EXCLUDED.data_hash, "
+                          "code_hash = EXCLUDED.code_hash, "
+                          "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+                          "code_boc = EXCLUDED.code_boc, "
+                          "data_boc = EXCLUDED.data_boc "
+                          "WHERE jetton_masters.last_transaction_lt < EXCLUDED.last_transaction_lt;";
+
+      txn.exec_params(query,
+                      master_data_.address,
+                      master_data_.total_supply,
+                      master_data_.mintable,
+                      master_data_.admin_address ? master_data_.admin_address.value().c_str() : nullptr,
+                      master_data_.jetton_wallet_code_hash.to_hex(),
+                      master_data_.data_hash.to_hex(),
+                      master_data_.code_hash.to_hex(),
+                      master_data_.last_transaction_lt,
+                      master_data_.code_boc,
+                      master_data_.data_boc);
+
+      txn.commit();
+      promise_.set_value(td::Unit());
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(PSLICE() << "Error inserting to PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
+class GetJettonMaster : public td::actor::Actor {
+private:
+  std::string connection_string_;
+  std::string address_;
+  td::Promise<JettonMasterData> promise_;
+public:
+  GetJettonMaster(std::string connection_string, std::string address, td::Promise<JettonMasterData> promise)
+    : connection_string_(std::move(connection_string))
+    , address_(std::move(address))
+    , promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created GetJettonMaster";
+  }
+
+  void start_up() override {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error("Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+
+      std::string query = "SELECT address, total_supply, mintable, admin_address, jetton_wallet_code_hash, data_hash, code_hash, last_transaction_lt, code_boc, data_boc "
+                          "FROM jetton_masters "
+                          "WHERE address = $1;";
+
+      pqxx::result result = txn.exec_params(query, address_);
+
+      if (result.size() != 1) {
+        promise_.set_error(td::Status::Error("Failed to find exactly one master with the given address"));
+        stop();
+        return;
+      }
+
+      pqxx::row row = result[0];
+
+      JettonMasterData master_data;
+      master_data.address = row[0].as<std::string>();
+      master_data.total_supply = row[1].as<uint64_t>();
+      master_data.mintable = row[2].as<bool>();
+      if (!row[3].is_null()) {
+        master_data.admin_address = row[3].as<std::string>();
+      }
+      master_data.jetton_wallet_code_hash = vm::CellHash::from_slice(td::base64_decode(row[4].as<std::string>()).move_as_ok());
+      master_data.data_hash = vm::CellHash::from_slice(td::base64_decode(row[5].as<std::string>()).move_as_ok());
+      master_data.code_hash = vm::CellHash::from_slice(td::base64_decode(row[6].as<std::string>()).move_as_ok());
+      master_data.last_transaction_lt = row[7].as<uint64_t>();
+      master_data.code_boc = row[8].as<std::string>();
+      master_data.data_boc = row[9].as<std::string>();
+
+      txn.commit();
+      promise_.set_value(std::move(master_data));
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(PSLICE() << "Error retrieving master from PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
 InsertManagerPostgres::InsertManagerPostgres(): 
     inserted_count_(0),
     start_time_(std::chrono::high_resolution_clock::now()) 
@@ -400,15 +583,15 @@ void InsertManagerPostgres::upsert_jetton_wallet(JettonWalletData jetton_wallet,
 }
 
 void InsertManagerPostgres::get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) {
-
+  td::actor::create_actor<GetJettonWallet>("getjettonwallet", credential.getConnectionString(), std::move(address), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) {
-
+  td::actor::create_actor<UpsertJettonMaster>("upsertjettonmaster", credential.getConnectionString(), std::move(jetton_wallet), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) {
-
+  td::actor::create_actor<GetJettonMaster>("getjettonmaster", credential.getConnectionString(), std::move(address), std::move(promise)).release();
 }
 
 
