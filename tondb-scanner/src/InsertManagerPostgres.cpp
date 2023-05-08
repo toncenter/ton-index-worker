@@ -1,5 +1,4 @@
 #include "InsertManagerPostgres.h"
-#include "BlockToSchema.hpp"
 #include <pqxx/pqxx>
 #include <chrono>
 
@@ -265,6 +264,62 @@ public:
   }
 };
 
+
+class UpsertJettonWallet: public td::actor::Actor {
+private:
+  std::string connection_string_;
+  JettonWalletData wallet_;
+  td::Promise<td::Unit> promise_;
+public:
+  UpsertJettonWallet(std::string connection_string, JettonWalletData wallet, td::Promise<td::Unit> promise): 
+    connection_string_(std::move(connection_string)), 
+    wallet_(std::move(wallet)), 
+    promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created UpsertJettonWallet";
+  }
+
+  void start_up() {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error("Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+      
+      std::string query = "INSERT INTO jetton_wallets (balance, address, owner, jetton, last_transaction_lt, code_hash, data_hash) "
+                            "VALUES ($1, $2, $3, $4, $5, $6, $7) "
+                            "ON CONFLICT (address) "
+                            "DO UPDATE SET "
+                            "balance = EXCLUDED.balance, "
+                            "owner = EXCLUDED.owner, "
+                            "jetton = EXCLUDED.jetton, "
+                            "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+                            "code_hash = EXCLUDED.code_hash, "
+                            "data_hash = EXCLUDED.data_hash "
+                            "WHERE jetton_wallets.last_transaction_lt < EXCLUDED.last_transaction_lt;";
+
+      txn.exec_params(query,
+                      wallet_.balance,
+                      wallet_.address,
+                      wallet_.owner,
+                      wallet_.jetton,
+                      wallet_.last_transaction_lt,
+                      td::base64_encode(wallet_.code_hash.as_slice()),
+                      td::base64_encode(wallet_.data_hash.as_slice()));
+
+
+      txn.commit();
+      promise_.set_value(td::Unit());
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(PSLICE() << "Error inserting to PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
 InsertManagerPostgres::InsertManagerPostgres(): 
     inserted_count_(0),
     start_time_(std::chrono::high_resolution_clock::now()) 
@@ -339,6 +394,23 @@ void InsertManagerPostgres::insert(ParsedBlock block_ds, td::Promise<td::Unit> p
   insert_queue_.push(std::move(block_ds));
   promise_queue_.push(std::move(promise));
 }
+
+void InsertManagerPostgres::upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) {
+  td::actor::create_actor<UpsertJettonWallet>("upsertjettonwallet", credential.getConnectionString(), std::move(jetton_wallet), std::move(promise)).release();
+}
+
+void InsertManagerPostgres::get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) {
+
+}
+
+void InsertManagerPostgres::upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) {
+
+}
+
+void InsertManagerPostgres::get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) {
+
+}
+
 
 
 std::string InsertManagerPostgres::PostgresCredential::getConnectionString()  {

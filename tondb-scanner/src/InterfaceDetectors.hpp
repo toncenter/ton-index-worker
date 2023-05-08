@@ -152,14 +152,6 @@ public:
     
     add_to_cache(address, data);
 
-    // // add this code hash to interface manager
-    // auto R = td::PromiseCreator::lambda([SelfId = actor_id(this), code_hash = code_cell->get_hash()](td::Result<td::Unit> res) {
-    //   if (res.is_error()) {
-    //     LOG(INFO) << "Failed to add jetton master code hash to interface manager: " << res.error();
-    //   }
-    // });
-    // td::actor::send_closure(interface_manager, &InterfaceManager::add_interface, code_cell->get_hash(), IT_JETTON_MASTER, std::move(R));
-
     promise.set_value(std::move(data));
   }
 

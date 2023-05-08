@@ -37,5 +37,10 @@ public:
   void alarm() override;
 
   void report_statistics();
+
   void insert(ParsedBlock block_ds, td::Promise<td::Unit> promise) override;
+  void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) override;
+  void get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) override;
+  void upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) override;
+  void get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) override;
 };
