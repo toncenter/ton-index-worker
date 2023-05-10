@@ -1,7 +1,35 @@
 #pragma once
 #include "td/actor/actor.h"
 #include "IndexData.h"
-#include "InterfaceDetectors.hpp"
+
+// struct JettonContent {
+
+// };
+
+struct JettonMasterData {
+  std::string address;
+  uint64_t total_supply;
+  bool mintable;
+  td::optional<std::string> admin_address;
+  // JettonContent jetton_content;
+  vm::CellHash jetton_wallet_code_hash;
+  vm::CellHash data_hash;
+  vm::CellHash code_hash;
+  uint64_t last_transaction_lt;
+  std::string code_boc;
+  std::string data_boc;
+};
+
+
+struct JettonWalletData {
+  uint64_t balance;
+  std::string address;
+  std::string owner;
+  std::string jetton;
+  uint64_t last_transaction_lt;
+  vm::CellHash code_hash;
+  vm::CellHash data_hash;
+};
 
 class InsertManagerInterface: public td::actor::Actor {
 public:

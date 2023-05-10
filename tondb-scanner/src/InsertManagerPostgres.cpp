@@ -426,9 +426,9 @@ public:
                       master_data_.total_supply,
                       master_data_.mintable,
                       master_data_.admin_address ? master_data_.admin_address.value().c_str() : nullptr,
-                      master_data_.jetton_wallet_code_hash.to_hex(),
-                      master_data_.data_hash.to_hex(),
-                      master_data_.code_hash.to_hex(),
+                      td::base64_encode(master_data_.jetton_wallet_code_hash.as_slice()),
+                      td::base64_encode(master_data_.data_hash.as_slice()),
+                      td::base64_encode(master_data_.code_hash.as_slice()),
                       master_data_.last_transaction_lt,
                       master_data_.code_boc,
                       master_data_.data_boc);
@@ -593,8 +593,6 @@ void InsertManagerPostgres::upsert_jetton_master(JettonMasterData jetton_wallet,
 void InsertManagerPostgres::get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) {
   td::actor::create_actor<GetJettonMaster>("getjettonmaster", credential.getConnectionString(), std::move(address), std::move(promise)).release();
 }
-
-
 
 std::string InsertManagerPostgres::PostgresCredential::getConnectionString()  {
   return (

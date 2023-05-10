@@ -9,6 +9,7 @@
 #include "IndexData.h"
 #include "td/actor/MultiPromise.h"
 #include "convert-utils.h"
+#include "InsertManager.h"
 
 enum SmcInterface {
   IT_JETTON_MASTER,
@@ -18,8 +19,11 @@ enum SmcInterface {
 class InterfaceManager: public td::actor::Actor {
 private:
   std::map<std::pair<vm::CellHash, SmcInterface>, bool> cache_{};
+  td::actor::ActorId<InsertManagerInterface> insert_manager_;
 public:
   // Interfaces table will consist of 3 columns: code_hash, interface, has_interface
+  InterfaceManager(td::actor::ActorId<InsertManagerInterface> insert_manager) : insert_manager_(insert_manager) {
+  }
 
   void check_interface(vm::CellHash code_hash, SmcInterface interface, td::Promise<bool> promise) {
     if (cache_.count({code_hash, interface})) {
@@ -44,23 +48,7 @@ public:
 
 
 
-// struct JettonContent {
 
-// };
-
-struct JettonMasterData {
-  std::string address;
-  uint64_t total_supply;
-  bool mintable;
-  td::optional<std::string> admin_address;
-  // JettonContent jetton_content;
-  vm::CellHash jetton_wallet_code_hash;
-  vm::CellHash data_hash;
-  vm::CellHash code_hash;
-  uint64_t last_transaction_lt;
-  std::string code_boc;
-  std::string data_boc;
-};
 
 /// @brief Detects Jetton Master according to TEP 74
 /// Checks that get_jetton_data() returns (int total_supply, int mintable, slice admin_address, cell jetton_content, cell jetton_wallet_code)
@@ -68,22 +56,30 @@ class JettonMasterDetector: public InterfaceDetector<JettonMasterData> {
 private:
   std::map<std::string, JettonMasterData> cache_{};
   td::actor::ActorId<InterfaceManager> interface_manager_;
+  td::actor::ActorId<InsertManagerInterface> insert_manager_;
 public:
-  JettonMasterDetector(td::actor::ActorId<InterfaceManager> interface_manager): interface_manager_(interface_manager) {
+  JettonMasterDetector(td::actor::ActorId<InterfaceManager> interface_manager, td::actor::ActorId<InsertManagerInterface> insert_manager) 
+    : interface_manager_(interface_manager)
+    , insert_manager_(insert_manager) {
   }
 
   void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, td::Promise<JettonMasterData> promise) override {
-    auto cached_res = check_cache(address);
-    if (cached_res.is_ok()) {
-      auto cached_data = cached_res.move_as_ok();
-      if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
-          || last_tx_lt < cached_data.last_transaction_lt) {
-        promise.set_value(std::move(cached_data)); // data did not not changed from cached or is more actual than requested
-        return;
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<JettonMasterData> cached_res) mutable {
+      if (cached_res.is_ok()) {
+        auto cached_data = cached_res.move_as_ok();
+        if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
+            || last_tx_lt < cached_data.last_transaction_lt) {
+          promise.set_value(std::move(cached_data)); // data did not not changed from cached or is more actual than requested
+          return;
+        }
       }
-    }
+      td::actor::send_closure(SelfId, &JettonMasterDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, std::move(promise));
+    });
 
-    // call interface manager and check if it is jetton master
+    check_cache(address, std::move(P));
+  }
+
+  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt,  td::Promise<JettonMasterData> promise) {
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<bool> code_hash_is_master) mutable {
       if (code_hash_is_master.is_error()) {
         if (code_hash_is_master.error().code() == 404) { // check for code hash was not performed
@@ -154,14 +150,18 @@ public:
     promise.set_value(std::move(data));
   }
 
-  void get_wallet_address(block::StdAddress master_address, block::StdAddress owner_address, td::Promise<block::StdAddress> P) {
-    auto r = check_cache(master_address);
-    if (r.is_error()) {
-      P.set_error(r.move_as_error());
-      return;
-    }
-    auto data = r.move_as_ok();
+  void get_wallet_address(block::StdAddress master_address, block::StdAddress owner_address, td::Promise<block::StdAddress> promise) {
+    auto P = td::PromiseCreator::lambda([this, master_address, owner_address, promise = std::move(promise)](td::Result<JettonMasterData> r) mutable {
+      if (r.is_error()) {
+        promise.set_error(r.move_as_error());
+        return;
+      }
+      get_wallet_address_impl(r.move_as_ok(), master_address, owner_address, std::move(promise));
+    });
+    check_cache(master_address, std::move(P));
+  }
 
+  void get_wallet_address_impl(JettonMasterData data, block::StdAddress master_address, block::StdAddress owner_address, td::Promise<block::StdAddress> P) {
     auto code_cell = vm::std_boc_deserialize(td::base64_decode(data.code_boc).move_as_ok()).move_as_ok();
     auto data_cell = vm::std_boc_deserialize(td::base64_decode(data.data_boc).move_as_ok()).move_as_ok();
     ton::SmartContract smc({code_cell, data_cell});
@@ -202,47 +202,41 @@ public:
     P.set_result(block::StdAddress::parse(wallet_address.move_as_ok()));
   }
 private:
-
-  td::Result<JettonMasterData> check_db(block::StdAddress address) {
-    return td::Status::Error("Not implemented");
-  }
-
-  td::Result<JettonMasterData> check_cache(block::StdAddress address) {
+  void check_cache(block::StdAddress address, td::Promise<JettonMasterData> promise) {
     auto it = cache_.find(convert::to_raw_address(address));
     if (it != cache_.end()) {
-      return it->second;
+      auto res = it->second;
+      promise.set_value(std::move(res));
+      return;
     }
-    auto db_res = check_db(address);
-    if (db_res.is_ok()) {
-      cache_.emplace(convert::to_raw_address(address), db_res.move_as_ok());
-      return db_res.move_as_ok();
-    }
-    return td::Status::Error(404, "Jetton Master not found in cache/db");
-  }
-
-  td::Status add_to_db(block::StdAddress address, JettonMasterData data) {
-    return td::Status::Error("Not implemented");
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_master, convert::to_raw_address(address), 
+                            promise.wrap([SelfId = actor_id(this), this, address](td::Result<JettonMasterData> r_data) mutable -> td::Result<JettonMasterData> {
+      if (r_data.is_error()) {
+        return r_data.move_as_error();
+      }
+      auto data = r_data.move_as_ok();
+      cache_.emplace(convert::to_raw_address(address), data);
+      return data;
+    }));
   }
 
   td::Status add_to_cache(block::StdAddress address, JettonMasterData data) {
     cache_.emplace(convert::to_raw_address(address), data);
     
-    add_to_db(address, data); // TODO: log if error
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address](td::Result<td::Unit> r_unit) mutable {
+      if (r_unit.is_error()) {
+        LOG(ERROR) << "Failed to add jetton master to db: " << r_unit.move_as_error();
+        return;
+      }
+      LOG(INFO) << "Added jetton master to db: " << convert::to_raw_address(address);
+    });
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_jetton_master, data, std::move(P));
 
     return td::Status::OK();
   }
 };
 
 
-struct JettonWalletData {
-  uint64_t balance;
-  std::string address;
-  std::string owner;
-  std::string jetton;
-  uint64_t last_transaction_lt;
-  vm::CellHash code_hash;
-  vm::CellHash data_hash;
-};
 
 /// @brief Detects Jetton Wallet according to TEP 74
 /// Checks that get_wallet_data() returns (int balance, slice owner, slice jetton, cell jetton_wallet_code)
@@ -251,24 +245,65 @@ private:
   std::map<std::string, JettonWalletData> cache_{};
   td::actor::ActorId<JettonMasterDetector> jetton_master_detector_;
   td::actor::ActorId<InterfaceManager> interface_manager_;
+  td::actor::ActorId<InsertManagerInterface> insert_manager_;
 public:
   JettonWalletDetector(td::actor::ActorId<JettonMasterDetector> jetton_master_detector,
-                       td::actor::ActorId<InterfaceManager> interface_manager) 
-    : jetton_master_detector_(jetton_master_detector), interface_manager_(interface_manager) {
+                       td::actor::ActorId<InterfaceManager> interface_manager,
+                       td::actor::ActorId<InsertManagerInterface> insert_manager) 
+    : jetton_master_detector_(jetton_master_detector), interface_manager_(interface_manager), insert_manager_(insert_manager) {
   }
 
-  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, td::Promise<JettonWalletData> promise) override {
-    auto cached_res = check_cache(address);
-    if (cached_res.is_ok()) {
-      auto cached_data = cached_res.move_as_ok();
-      if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
-          || last_tx_lt < cached_data.last_transaction_lt) {
-        promise.set_value(std::move(cached_data)); // data did not not changed from cached or cached data is more actual than requested
-        return;
-      }
-    }
+  // void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, td::Promise<JettonWalletData> promise) override {
+  //   auto cached_res = check_cache(address);
+  //   if (cached_res.is_ok()) {
+  //     auto cached_data = cached_res.move_as_ok();
+  //     if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
+  //         || last_tx_lt < cached_data.last_transaction_lt) {
+  //       promise.set_value(std::move(cached_data)); // data did not not changed from cached or cached data is more actual than requested
+  //       return;
+  //     }
+  //   }
 
-    // call interface manager and check if it is jetton wallet
+  //   // call interface manager and check if it is jetton wallet
+  //   auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<bool> code_hash_is_wallet) mutable {
+  //     if (code_hash_is_wallet.is_error()) {
+  //       if (code_hash_is_wallet.error().code() == 404) { // check for code hash was not performed
+  //         td::actor::send_closure(SelfId, &JettonWalletDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, std::move(promise));
+  //         return;
+  //       }
+
+  //       LOG(ERROR) << "Failed to get interfaces for " << convert::to_raw_address(address) << ": " << code_hash_is_wallet.error();
+  //       promise.set_error(code_hash_is_wallet.move_as_error());
+  //       return;
+  //     }
+  //     if (!code_hash_is_wallet.move_as_ok()) {
+  //       promise.set_error(td::Status::Error(204, "Code hash is not a Jetton Wallet"));
+  //       return;
+  //     }
+
+  //     td::actor::send_closure(SelfId, &JettonWalletDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, std::move(promise));
+  //   });
+
+  //   td::actor::send_closure(interface_manager_, &InterfaceManager::check_interface, code_cell->get_hash(), IT_JETTON_WALLET, std::move(P));
+  // }
+
+   void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, td::Promise<JettonWalletData> promise) override {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<JettonWalletData> cached_res) mutable {
+      if (cached_res.is_ok()) {
+        auto cached_data = cached_res.move_as_ok();
+        if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
+            || last_tx_lt < cached_data.last_transaction_lt) {
+          promise.set_value(std::move(cached_data)); // data did not not changed from cached or is more actual than requested
+          return;
+        }
+      }
+      td::actor::send_closure(SelfId, &JettonWalletDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, std::move(promise));
+    });
+
+    check_cache(address, std::move(P));
+  }
+
+  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt,  td::Promise<JettonWalletData> promise) {
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<bool> code_hash_is_wallet) mutable {
       if (code_hash_is_wallet.is_error()) {
         if (code_hash_is_wallet.error().code() == 404) { // check for code hash was not performed
@@ -356,7 +391,7 @@ private:
           LOG(ERROR) << "Jetton Master returned wrong address: " << convert::to_raw_address(address);
           promise.set_error(td::Status::Error(404, "Couldn't verify Jetton Wallet. Possibly scam."));
         } else {
-          this->add_to_cache(address, data.code_hash, data);
+          td::actor::send_closure(SelfId, &JettonWalletDetector::add_to_cache, address, data);
           promise.set_value(std::move(data));
         }
       }
@@ -368,33 +403,65 @@ private:
     td::actor::send_closure(jetton_master_detector_, &JettonMasterDetector::get_wallet_address, master_addr, owner_addr, std::move(P));
   }
 
-
-  td::Result<JettonWalletData> check_db(block::StdAddress address) {
-    return td::Status::Error("Not implemented");
-  }
-
-  td::Result<JettonWalletData> check_cache(block::StdAddress address) {
+  void check_cache(block::StdAddress address, td::Promise<JettonWalletData> promise) {
     auto it = cache_.find(convert::to_raw_address(address));
     if (it != cache_.end()) {
-      return it->second;
+      auto res = it->second;
+      promise.set_value(std::move(res));
+      return;
     }
-    auto db_res = check_db(address);
-    if (db_res.is_ok()) {
-      cache_.emplace(convert::to_raw_address(address), db_res.move_as_ok());
-      return db_res.move_as_ok();
-    }
-    return td::Status::Error(404, "Jetton Master not found in cache/db");
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_wallet, convert::to_raw_address(address), 
+                            promise.wrap([SelfId = actor_id(this), this, address](td::Result<JettonWalletData> r_data) mutable -> td::Result<JettonWalletData> {
+      if (r_data.is_error()) {
+        return r_data.move_as_error();
+      }
+      auto data = r_data.move_as_ok();
+      cache_.emplace(convert::to_raw_address(address), data);
+      return data;
+    }));
   }
 
-  td::Status add_to_db(block::StdAddress address, vm::CellHash code_hash, JettonWalletData data) {
-    return td::Status::Error("Not implemented");
-  }
-
-  td::Status add_to_cache(block::StdAddress address, vm::CellHash code_hash, JettonWalletData data) {
+  td::Status add_to_cache(block::StdAddress address, JettonWalletData data) {
     cache_.emplace(convert::to_raw_address(address), data);
     
-    add_to_db(address, code_hash, data); // TODO: log if error
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address](td::Result<td::Unit> r_unit) mutable {
+      if (r_unit.is_error()) {
+        LOG(ERROR) << "Failed to add jetton master to db: " << r_unit.move_as_error();
+        return;
+      }
+      LOG(INFO) << "Added jetton master to db: " << convert::to_raw_address(address);
+    });
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_jetton_wallet, data, std::move(P));
 
     return td::Status::OK();
   }
+
+  // td::Result<JettonWalletData> check_db(block::StdAddress address) {
+  //   return td::Status::Error("Not implemented");
+  // }
+
+  // td::Result<JettonWalletData> check_cache(block::StdAddress address) {
+  //   auto it = cache_.find(convert::to_raw_address(address));
+  //   if (it != cache_.end()) {
+  //     return it->second;
+  //   }
+  //   auto db_res = check_db(address);
+  //   if (db_res.is_ok()) {
+  //     cache_.emplace(convert::to_raw_address(address), db_res.move_as_ok());
+  //     return db_res.move_as_ok();
+  //   }
+  //   return td::Status::Error(404, "Jetton Master not found in cache/db");
+  // }
+
+  // td::Status add_to_db(block::StdAddress address, vm::CellHash code_hash, JettonWalletData data) {
+  //   return td::Status::Error("Not implemented");
+  // }
+
+  // td::Status add_to_cache(block::StdAddress address, vm::CellHash code_hash, JettonWalletData data) {
+  //   cache_.emplace(convert::to_raw_address(address), data);
+    
+  //   add_to_db(address, code_hash, data); // TODO: log if error
+
+  //   return td::Status::OK();
+  // }
 };

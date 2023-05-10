@@ -285,7 +285,7 @@ void DbScanner::start_up() {
 
 void DbScanner::run() {
   db_ = td::actor::create_actor<ton::validator::RootDb>("db", td::actor::ActorId<ton::validator::ValidatorManager>(), db_root_);
-  event_processor_ = td::actor::create_actor<EventProcessor>("event_processor");
+  event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
 }
 
 void DbScanner::update_last_mc_seqno() {
