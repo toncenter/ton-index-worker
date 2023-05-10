@@ -445,9 +445,7 @@ private:
     for (auto &addr : addresses) {
       auto shard_account_csr = accounts_dict.lookup(addr);
       if (shard_account_csr.is_null()) {
-        if (addr.to_hex() != "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEF"){
-          LOG(WARNING) << "Could not find account " << addr.to_hex() << " in shard state";
-        }
+        // account is uninitialized after this block
         continue;
       } 
       td::Ref<vm::Cell> account_root = shard_account_csr->prefetch_ref();

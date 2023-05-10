@@ -356,7 +356,6 @@ void DbScanner::seqno_parsed(int mc_seqno, td::Result<ParsedBlock> parsed_block)
   }
 
   auto R = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno, parsed_block = parsed_block.ok_ref()](td::Result<td::Unit> res) {
-    LOG(INFO) << "Int detector finished";
     td::actor::send_closure(SelfId, &DbScanner::interfaces_processed, mc_seqno, std::move(parsed_block));
   });
 

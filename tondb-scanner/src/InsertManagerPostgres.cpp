@@ -353,9 +353,9 @@ public:
 
       if (result.size() != 1) {
         if (result.size() == 0) {
-          promise_.set_error(td::Status::Error(PSLICE() << "Jetton Wallet for address " << address_ << " not found"));
+          promise_.set_error(td::Status::Error(404, PSLICE() << "Jetton Wallet for address " << address_ << " not found"));
         } else {
-          promise_.set_error(td::Status::Error(PSLICE() << "Jetton Wallet for address " << address_ << " is not unique (found " << result.size() << " wallets)"));
+          promise_.set_error(td::Status::Error(503, PSLICE() << "Jetton Wallet for address " << address_ << " is not unique (found " << result.size() << " wallets)"));
         }
         stop();
         return;
@@ -473,7 +473,12 @@ public:
       pqxx::result result = txn.exec_params(query, address_);
 
       if (result.size() != 1) {
-        promise_.set_error(td::Status::Error("Failed to find exactly one master with the given address"));
+        if (result.size() == 0) {
+          promise_.set_error(td::Status::Error(404, PSLICE() << "Jetton master not found: " << address_));
+        } else {
+          promise_.set_error(td::Status::Error(503, PSLICE() << "Jetton master not unique: " << address_ << ", found " << result.size() << " records"));
+        }
+        
         stop();
         return;
       }

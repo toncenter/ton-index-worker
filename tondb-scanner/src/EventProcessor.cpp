@@ -13,12 +13,14 @@
 
 // process ParsedBlock and try detect master and wallet interfaces
 void EventProcessor::process(ParsedBlock block, td::Promise<td::Unit> &&promise) {
-  LOG(INFO) << "Detecting interfaces " << block.account_states_.size();
   td::MultiPromise mp;
   auto ig = mp.init_guard();
   ig.add_promise(std::move(promise));
   for (auto& account_state : block.account_states_) {
-    LOG(INFO) << "Detecting interfaces for " << account_state.account;
+    if (account_state.account == "-1:5555555555555555555555555555555555555555555555555555555555555555" || 
+        account_state.account == "-1:3333333333333333333333333333333333333333333333333333333333333333") {
+      continue;
+    }
     auto address_res = block::StdAddress::parse(account_state.account);
     if (address_res.is_error()) {
       continue;
@@ -34,9 +36,9 @@ void EventProcessor::process(ParsedBlock block, td::Promise<td::Unit> &&promise)
     auto P1 = td::PromiseCreator::lambda([this, code_cell, address, promise = ig.get_promise()](td::Result<JettonMasterData> master_data) mutable {
       bool is_master = master_data.is_ok();
       if (!is_master) {
-        LOG(INFO) << "Failed to detect interface JETTON_MASTER for " << convert::to_raw_address(address) << ": " << master_data.move_as_error();
+        LOG(DEBUG) << "Failed to detect interface JETTON_MASTER for " << convert::to_raw_address(address) << ": " << master_data.move_as_error();
       } else {
-        LOG(INFO) << "Detected interface JETTON_MASTER for " << convert::to_raw_address(address);
+        LOG(DEBUG) << "Detected interface JETTON_MASTER for " << convert::to_raw_address(address);
       }
       td::actor::send_closure(interface_manager_, &InterfaceManager::set_interface, code_cell->get_hash(), IT_JETTON_MASTER, is_master, std::move(promise));
     });
@@ -45,9 +47,9 @@ void EventProcessor::process(ParsedBlock block, td::Promise<td::Unit> &&promise)
     auto P2 = td::PromiseCreator::lambda([this, code_cell, address, promise = ig.get_promise()](td::Result<JettonWalletData> wallet_data) mutable {
       bool is_wallet = wallet_data.is_ok();
       if (!is_wallet) {
-        LOG(INFO) << "Failed to detect interface JETTON_WALLET for " << convert::to_raw_address(address) << ": " << wallet_data.move_as_error();
+        LOG(DEBUG) << "Failed to detect interface JETTON_WALLET for " << convert::to_raw_address(address) << ": " << wallet_data.move_as_error();
       } else {
-        LOG(INFO) << "Detected interface JETTON_WALLET for " << convert::to_raw_address(address);
+        LOG(DEBUG) << "Detected interface JETTON_WALLET for " << convert::to_raw_address(address);
       }
       td::actor::send_closure(interface_manager_, &InterfaceManager::set_interface, code_cell->get_hash(), IT_JETTON_WALLET, is_wallet, std::move(promise));
     });
@@ -56,7 +58,7 @@ void EventProcessor::process(ParsedBlock block, td::Promise<td::Unit> &&promise)
 }
 
 void EventProcessor::process_transactions(ParsedBlock block, td::Promise<td::Unit> &&promise) {
-  LOG(INFO) << "Detecting tokens transactions " << block.transactions_.size();
+  LOG(DEBUG) << "Detecting tokens transactions " << block.transactions_.size();
   td::MultiPromise mp;
   auto ig = mp.init_guard();
   ig.add_promise(std::move(promise));

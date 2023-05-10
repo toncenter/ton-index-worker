@@ -20,7 +20,7 @@ private:
   
   std::queue<int> seqnos_to_process_;
   std::set<int> seqnos_in_progress_;
-  int max_parallel_fetch_actors_{1};
+  int max_parallel_fetch_actors_{2000};
   int last_known_seqno_{-1};
 
 public:
