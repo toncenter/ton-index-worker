@@ -15,11 +15,11 @@ class ParseQuery: public td::actor::Actor {
 private:
   const int mc_seqno_;
   MasterchainBlockDataState mc_block_;
-  ParsedBlock result;
-  td::Promise<ParsedBlock> promise_;
+  ParsedBlockPtr result;
+  td::Promise<ParsedBlockPtr> promise_;
 public:
-  ParseQuery(int mc_seqno, MasterchainBlockDataState mc_block, td::Promise<ParsedBlock> promise)
-    : mc_seqno_(mc_seqno), mc_block_(std::move(mc_block)), promise_(std::move(promise)) {}
+  ParseQuery(int mc_seqno, MasterchainBlockDataState mc_block, td::Promise<ParsedBlockPtr> promise)
+    : mc_seqno_(mc_seqno), mc_block_(std::move(mc_block)), result(std::make_shared<ParsedBlock>()), promise_(std::move(promise)) {}
 
   void start_up() override {
     auto status = parse_impl();
@@ -49,7 +49,7 @@ private:
       if (!mc_block) {
           mc_block = schema_block;
       }
-      result.blocks_.push_back(schema_block);
+      result->blocks_.push_back(schema_block);
 
       // transactions and messages
       std::set<td::Bits256> addresses;
@@ -392,13 +392,13 @@ private:
             TRY_RESULT(in_msg, parse_message(trans.r1.in_msg->prefetch_ref()));
             schema_tx.in_msg_body = in_msg.body_cell;
 
-            result.messages_.push_back(in_msg);
+            result->messages_.push_back(in_msg);
 
             schema::TransactionMessage tx_msg;
             tx_msg.transaction_hash = schema_tx.hash;
             tx_msg.message_hash = in_msg.hash;
             tx_msg.direction = "in";
-            result.transaction_messages_.push_back(tx_msg);
+            result->transaction_messages_.push_back(tx_msg);
           }
 
           if (trans.outmsg_cnt != 0) {
@@ -406,13 +406,13 @@ private:
             for (int x = 0; x < trans.outmsg_cnt; x++) {
               TRY_RESULT(out_msg, parse_message(dict.lookup_ref(td::BitArray<15>{x})));
 
-              result.messages_.push_back(out_msg);
+              result->messages_.push_back(out_msg);
 
               schema::TransactionMessage tx_msg;
               tx_msg.transaction_hash = schema_tx.hash;
               tx_msg.message_hash = out_msg.hash;
               tx_msg.direction = "out";
-              result.transaction_messages_.push_back(tx_msg);
+              result->transaction_messages_.push_back(tx_msg);
             }
           }
 
@@ -424,7 +424,7 @@ private:
           schema_tx.account_state_hash_before = td::base64_encode(state_hash_update.old_hash.as_slice());
           schema_tx.account_state_hash_after = td::base64_encode(state_hash_update.new_hash.as_slice());
 
-          result.transactions_.push_back(schema_tx);
+          result->transactions_.push_back(schema_tx);
 
           addresses.insert(cur_addr);
         }
@@ -456,14 +456,14 @@ private:
         continue;
       case block::gen::Account::account: {
         TRY_RESULT(account, parse_account(account_root));
-        result.account_states_.push_back(account);
+        result->account_states_.push_back(account);
         break;
       }
       default:
         return td::Status::Error("Unknown account tag");
       }
     }
-    LOG(DEBUG) << "Parsed " << result.account_states_.size() << " account states";
+    LOG(DEBUG) << "Parsed " << result->account_states_.size() << " account states";
     return td::Status::OK();
   }
 
@@ -532,7 +532,7 @@ ParseManager::ParseManager() {
     
 }
 
-void ParseManager::parse(int mc_seqno, MasterchainBlockDataState mc_block, td::Promise<ParsedBlock> promise) {
+void ParseManager::parse(int mc_seqno, MasterchainBlockDataState mc_block, td::Promise<ParsedBlockPtr> promise) {
     td::actor::create_actor<ParseQuery>("parsequery", mc_seqno, std::move(mc_block), std::move(promise)).release();
 }
 

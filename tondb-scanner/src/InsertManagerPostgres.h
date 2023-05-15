@@ -4,7 +4,7 @@
 
 class InsertManagerPostgres: public InsertManagerInterface {
 private:
-  std::queue<ParsedBlock> insert_queue_;
+  std::queue<ParsedBlockPtr> insert_queue_;
   std::queue<td::Promise<td::Unit>> promise_queue_;
 
   int batch_size{2048};
@@ -38,7 +38,7 @@ public:
 
   void report_statistics();
 
-  void insert(ParsedBlock block_ds, td::Promise<td::Unit> promise) override;
+  void insert(ParsedBlockPtr block_ds, td::Promise<td::Unit> promise) override;
   void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) override;
   void get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) override;
   void upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) override;

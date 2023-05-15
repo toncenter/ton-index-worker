@@ -10,18 +10,34 @@
 
 
 td::Result<std::string> convert::to_raw_address(td::Ref<vm::CellSlice> cs) {
-  auto tag = block::gen::MsgAddressInt().get_tag(*cs);
-  if (tag < 0) {
-    return td::Status::Error("Failed to read MsgAddressInt tag");
+  auto tag = block::gen::MsgAddress().get_tag(*cs);
+  switch (tag) {
+    case block::gen::MsgAddress::cons1:
+      switch (block::gen::MsgAddressInt().get_tag(*cs)) {
+        case block::gen::MsgAddressInt::addr_var:
+          return "addr_var";
+        case block::gen::MsgAddressInt::addr_std: {
+          block::gen::MsgAddressInt::Record_addr_std addr;
+          if (!tlb::csr_unpack(cs, addr)) {
+            return td::Status::Error("Failed to unpack MsgAddressInt");
+          }
+          return std::to_string(addr.workchain_id) + ":" + addr.address.to_hex();
+        }
+        default:
+          return td::Status::Error("Failed to unpack MsgAddressInt");
+      }
+    case block::gen::MsgAddress::cons2:
+      switch (block::gen::MsgAddressExt().get_tag(*cs)) {
+        case block::gen::MsgAddressExt::addr_none:
+          return "addr_none";
+        case block::gen::MsgAddressExt::addr_extern:
+          return "addr_extern";
+        default:
+          return td::Status::Error("Failed to unpack MsgAddressExt");
+      }
+    default:
+      return td::Status::Error("Failed to unpack MsgAddress");
   }
-  if (tag == block::gen::MsgAddressInt::addr_var) {
-    return "addr_var";
-  }
-  block::gen::MsgAddressInt::Record_addr_std addr;
-  if (!tlb::csr_unpack(cs, addr)) {
-    return td::Status::Error("Failed to unpack MsgAddressInt");
-  }
-  return std::to_string(addr.workchain_id) + ":" + addr.address.to_hex();
 }
 
 std::string convert::to_raw_address(block::StdAddress address) {

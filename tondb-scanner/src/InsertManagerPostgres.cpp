@@ -1,6 +1,7 @@
-#include "InsertManagerPostgres.h"
 #include <pqxx/pqxx>
 #include <chrono>
+#include "InsertManagerPostgres.h"
+#include "convert-utils.h"
 
 #define TO_SQL_BOOL(x) ((x) ? "TRUE" : "FALSE")
 #define TO_SQL_STRING(x) ("'" + (x) + "'")
@@ -11,10 +12,10 @@
 class InsertBatchMcSeqnos: public td::actor::Actor {
 private:
   std::string connection_string_;
-  std::vector<ParsedBlock> mc_blocks_;
+  std::vector<ParsedBlockPtr> mc_blocks_;
   td::Promise<td::Unit> promise_;
 public:
-  InsertBatchMcSeqnos(std::string connection_string, std::vector<ParsedBlock> mc_blocks, td::Promise<td::Unit> promise): 
+  InsertBatchMcSeqnos(std::string connection_string, std::vector<ParsedBlockPtr> mc_blocks, td::Promise<td::Unit> promise): 
     connection_string_(std::move(connection_string)), 
     mc_blocks_(std::move(mc_blocks)), 
     promise_(std::move(promise))
@@ -32,7 +33,7 @@ public:
 
     bool is_first = true;
     for (const auto& mc_block : mc_blocks_) {
-      for (const auto& block : mc_block.blocks_) {
+      for (const auto& block : mc_block->blocks_) {
         if (is_first) {
           is_first = false;
         } else {
@@ -70,6 +71,9 @@ public:
               << ")";
       }
     }
+    if (is_first) {
+      return;
+    }
     query << " ON CONFLICT DO NOTHING";
 
     // LOG(DEBUG) << "Running SQL query: " << query.str();
@@ -85,7 +89,7 @@ public:
                                        "action_total_action_fees) VALUES ";
     bool is_first = true;
     for (const auto& mc_block : mc_blocks_) {
-      for (const auto& transaction : mc_block.transactions_) {
+      for (const auto& transaction : mc_block->transactions_) {
         if (is_first) {
           is_first = false;
         } else {
@@ -120,6 +124,9 @@ public:
               << ")";
       }
     }
+    if (is_first) {
+      return;
+    }
     query << " ON CONFLICT DO NOTHING";
 
     // LOG(DEBUG) << "Running SQL query: " << query.str();
@@ -132,7 +139,7 @@ public:
                                  "ihr_disabled, bounce, bounced, import_fee, body_hash, init_state_hash) VALUES ";
     bool is_first = true;
     for (const auto& mc_block : mc_blocks_) {
-      for (const auto& message : mc_block.messages_) {
+      for (const auto& message : mc_block->messages_) {
         if (is_first) {
           is_first = false;
         } else {
@@ -157,6 +164,9 @@ public:
               << ")";
       }
     }
+    if (is_first) {
+      return;
+    }
     query << " ON CONFLICT DO NOTHING";
 
     // LOG(DEBUG) << "Running SQL query: " << query.str();
@@ -166,7 +176,7 @@ public:
     is_first = true;
     query << "INSERT INTO message_contents (hash, body) VALUES ";
     for (const auto& mc_block : mc_blocks_) {
-      for (const auto& message : mc_block.messages_) {
+      for (const auto& message : mc_block->messages_) {
         if (is_first) {
           is_first = false;
         } else {
@@ -184,6 +194,9 @@ public:
         }
       }
     }
+    if (is_first) {
+      return;
+    }
     query << " ON CONFLICT DO NOTHING";
 
     // LOG(DEBUG) << "Running SQL query: " << query.str();
@@ -195,7 +208,7 @@ public:
     query << "INSERT INTO transaction_messages (transaction_hash, message_hash, direction) VALUES ";
     bool is_first = true;
     for (const auto& mc_block : mc_blocks_) {
-      for (const auto& tx_msg : mc_block.transaction_messages_) {
+      for (const auto& tx_msg : mc_block->transaction_messages_) {
         if (is_first) {
           is_first = false;
         } else {
@@ -208,6 +221,9 @@ public:
               << ")";
       }
     }
+    if (is_first) {
+      return;
+    }
     query << " ON CONFLICT DO NOTHING";
 
     // LOG(DEBUG) << "Running SQL query: " << query.str();
@@ -219,7 +235,7 @@ public:
     query << "INSERT INTO account_states (hash, account, balance, account_status, frozen_hash, code_hash, data_hash) VALUES ";
     bool is_first = true;
     for (const auto& mc_block : mc_blocks_) {
-      for (const auto& account_state : mc_block.account_states_) {
+      for (const auto& account_state : mc_block->account_states_) {
         if (is_first) {
           is_first = false;
         } else {
@@ -236,10 +252,85 @@ public:
               << ")";
       }
     }
+    if (is_first) {
+      return;
+    }
     query << " ON CONFLICT DO NOTHING";
     // LOG(DEBUG) << "Running SQL query: " << query.str();
     transaction.exec0(query.str());
   }
+
+  void insert_jetton_transfers(pqxx::work &transaction) {
+    std::ostringstream query;
+    query << "INSERT INTO jetton_transfers (transaction_hash, query_id, amount, destination, response_destination, custom_payload, forward_ton_amount, forward_payload) VALUES ";
+    bool is_first = true;
+    for (const auto& mc_block : mc_blocks_) {
+      for (const auto& transfer : mc_block->get_events<JettonTransfer>()) {
+        if (is_first) {
+          is_first = false;
+        } else {
+          query << ", ";
+        }
+        auto custom_payload_boc_r = convert::to_bytes(transfer.custom_payload);
+        auto custom_payload_boc = custom_payload_boc_r.is_ok() ? custom_payload_boc_r.move_as_ok() : td::optional<std::string>{};
+
+        auto forward_payload_boc_r = convert::to_bytes(transfer.forward_payload);
+        auto forward_payload_boc = forward_payload_boc_r.is_ok() ? forward_payload_boc_r.move_as_ok() : td::optional<std::string>{};
+
+        query << "("
+              << "'" << transfer.transaction_hash << "',"
+              << transfer.query_id << ","
+              << (transfer.amount.not_null() ? transfer.amount->to_dec_string() : "NULL") << ","
+              << "'" << transfer.destination << "',"
+              << "'" << transfer.response_destination << "',"
+              << TO_SQL_OPTIONAL_STRING(custom_payload_boc) << ","
+              << (transfer.forward_ton_amount.not_null() ? transfer.forward_ton_amount->to_dec_string() : "NULL") << ","
+              << TO_SQL_OPTIONAL_STRING(forward_payload_boc)
+              << ")";
+      }
+    }
+    if (is_first) {
+      return;
+    }
+    query << " ON CONFLICT DO NOTHING";
+
+    // LOG(DEBUG) << "Running SQL query: " << query.str();
+    transaction.exec0(query.str());
+  }
+
+  void insert_jetton_burns(pqxx::work &transaction) {
+    std::ostringstream query;
+    query << "INSERT INTO jetton_burns (transaction_hash, query_id, amount, response_destination, custom_payload) VALUES ";
+    bool is_first = true;
+    for (const auto& mc_block : mc_blocks_) {
+      for (const auto& burn : mc_block->get_events<JettonBurn>()) {
+        if (is_first) {
+          is_first = false;
+        } else {
+          query << ", ";
+        }
+
+        auto custom_payload_boc_r = convert::to_bytes(burn.custom_payload);
+        auto custom_payload_boc = custom_payload_boc_r.is_ok() ? custom_payload_boc_r.move_as_ok() : td::optional<std::string>{};
+
+        query << "("
+              << "'" << burn.transaction_hash << "',"
+              << burn.query_id << ","
+              << (burn.amount.not_null() ? burn.amount->to_dec_string() : "NULL") << ","
+              << "'" << burn.response_destination << "',"
+              << TO_SQL_OPTIONAL_STRING(custom_payload_boc)
+              << ")";
+      }
+    }
+    if (is_first) {
+      return;
+    }
+    query << " ON CONFLICT DO NOTHING";
+
+    // LOG(DEBUG) << "Running SQL query: " << query.str();
+    transaction.exec0(query.str());
+  }
+
 
   void start_up() {
     try {
@@ -255,6 +346,8 @@ public:
       insert_messsages(txn);
       insert_tx_msgs(txn);
       insert_account_states(txn);
+      insert_jetton_transfers(txn);
+      insert_jetton_burns(txn);
       txn.commit();
       promise_.set_value(td::Unit());
     } catch (const std::exception &e) {
@@ -539,9 +632,9 @@ void InsertManagerPostgres::alarm() {
   LOG(DEBUG) << "insert queue size: " << insert_queue_.size();
 
   std::vector<td::Promise<td::Unit>> promises;
-  std::vector<ParsedBlock> schema_blocks;
+  std::vector<ParsedBlockPtr> schema_blocks;
   while (!insert_queue_.empty() && schema_blocks.size() < batch_size) {
-    auto schema_block = insert_queue_.front();
+    auto schema_block = std::move(insert_queue_.front());
     insert_queue_.pop();
 
     auto promise = std::move(promise_queue_.front());
@@ -578,7 +671,7 @@ void InsertManagerPostgres::alarm() {
   }
 }
 
-void InsertManagerPostgres::insert(ParsedBlock block_ds, td::Promise<td::Unit> promise) {
+void InsertManagerPostgres::insert(ParsedBlockPtr block_ds, td::Promise<td::Unit> promise) {
   insert_queue_.push(std::move(block_ds));
   promise_queue_.push(std::move(promise));
 }

@@ -8,6 +8,7 @@ add_executable(tondb-scanner
     src/InterfaceDetectors.hpp
     src/EventProcessor.cpp
     src/convert-utils.cpp
+    src/tokens.cpp
 )
 
 target_include_directories(tondb-scanner 
@@ -49,6 +50,7 @@ add_executable(tondb-scanner-test
     src/InterfaceDetectors.hpp
     src/EventProcessor.cpp
     src/convert-utils.cpp
+    src/tokens.cpp
     test/tests.cpp)
 
 target_include_directories(tondb-scanner-test

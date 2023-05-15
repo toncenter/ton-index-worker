@@ -9,14 +9,31 @@
 #include "IndexData.h"
 #include "td/actor/MultiPromise.h"
 #include "convert-utils.h"
+#include "tokens.h"
 
 
 // process ParsedBlock and try detect master and wallet interfaces
-void EventProcessor::process(ParsedBlock block, td::Promise<td::Unit> &&promise) {
+void EventProcessor::process(ParsedBlockPtr block, td::Promise<> &&promise) {
+  //   promise.set_value(td::Unit());
+  // return;
+  auto P = td::PromiseCreator::lambda([SelfId=actor_id(this), block, promise = std::move(promise)](td::Result<td::Unit> res) mutable {
+    if (res.is_error()) {
+      promise.set_error(res.move_as_error_prefix("Failed to process account states for mc block " + std::to_string(block->blocks_[0].seqno) + ": "));
+      return;
+    }
+    td::actor::send_closure(SelfId, &EventProcessor::process_transactions, block->transactions_, promise.wrap([block](std::vector<BlockchainEvent> events) {
+      block->events_ = std::move(events);
+      return td::Unit();
+    }));
+  });
+  process_states(block->account_states_, std::move(P));
+}
+
+void EventProcessor::process_states(const std::vector<schema::AccountState>& account_states, td::Promise<td::Unit> &&promise) {
   td::MultiPromise mp;
   auto ig = mp.init_guard();
   ig.add_promise(std::move(promise));
-  for (auto& account_state : block.account_states_) {
+  for (const auto& account_state : account_states) {
     if (account_state.account == "-1:5555555555555555555555555555555555555555555555555555555555555555" || 
         account_state.account == "-1:3333333333333333333333333333333333333333333333333333333333333333") {
       continue;
@@ -30,7 +47,7 @@ void EventProcessor::process(ParsedBlock block, td::Promise<td::Unit> &&promise)
     auto code_cell = account_state.code;
     auto data_cell = account_state.data; 
     if (code_cell.is_null() || data_cell.is_null()) {
-      continue; //TODO: Should continue when data is null?
+      continue;
     }
     auto last_tx_lt = account_state.last_trans_lt;
     auto P1 = td::PromiseCreator::lambda([this, code_cell, address, promise = ig.get_promise()](td::Result<JettonMasterData> master_data) mutable {
@@ -57,22 +74,60 @@ void EventProcessor::process(ParsedBlock block, td::Promise<td::Unit> &&promise)
   }
 }
 
-void EventProcessor::process_transactions(ParsedBlock block, td::Promise<td::Unit> &&promise) {
-  LOG(DEBUG) << "Detecting tokens transactions " << block.transactions_.size();
+void EventProcessor::process_transactions(const std::vector<schema::Transaction>& transactions, td::Promise<std::vector<BlockchainEvent>> &&promise) {
+  LOG(DEBUG) << "Detecting tokens transactions " << transactions.size();
+
+  auto events = std::make_shared<std::vector<BlockchainEvent>>();
+
+  auto P = td::PromiseCreator::lambda([SelfId=actor_id(this), events, promise = std::move(promise)](td::Result<td::Unit> res) mutable {
+    if (res.is_error()) {
+      promise.set_error(res.move_as_error_prefix("Failed to process events: "));
+      return;
+    }
+    promise.set_value(std::move(*events));
+  });
+
   td::MultiPromise mp;
   auto ig = mp.init_guard();
-  ig.add_promise(std::move(promise));
+  ig.add_promise(std::move(P));
 
-  for (auto& tx : block.transactions_) {
-    if (!tx.compute_exit_code || !tx.compute_exit_code.value()) {
-      // tx is not successfull, skipping
-      continue;
-    }
+  for (auto& tx : transactions) {
     if (tx.in_msg_body.is_null()) {
       // tx doesn't have in_msg, skipping
       continue;
     }
-    
 
+    // template lambda to process td::Result<T> event
+    auto process = [events, tx, &ig](auto&& event, td::Promise<> promise) mutable {
+      if (event.is_error()) {
+        LOG(DEBUG) << "Failed to parse event (tx hash " << tx.hash << "): " << event.error();
+        if (event.error().code() == 503) {
+          promise.set_error(event.move_as_error());
+          return;
+        }
+      } else {
+        LOG(DEBUG) << "Event: " << event.move_as_ok().transaction_hash;
+        events->push_back(event.move_as_ok());
+      }
+      promise.set_value(td::Unit());
+    };
+
+    auto cs = vm::load_cell_slice_ref(tx.in_msg_body);
+    switch (tokens::gen::t_InternalMsgBody.check_tag(*cs)) {
+      case tokens::gen::InternalMsgBody::transfer: 
+        td::actor::send_closure(jetton_wallet_detector_, &JettonWalletDetector::parse_transfer, tx, cs, 
+          td::PromiseCreator::lambda([events, tx, process, promise = ig.get_promise()](td::Result<JettonTransfer> transfer) mutable { 
+            process(std::move(transfer), std::move(promise));
+          })
+        );
+      case tokens::gen::InternalMsgBody::burn: 
+        td::actor::send_closure(jetton_wallet_detector_, &JettonWalletDetector::parse_burn, tx, cs, 
+          td::PromiseCreator::lambda([events, tx, process, promise = ig.get_promise()](td::Result<JettonBurn> burn) mutable { 
+            process(std::move(burn), std::move(promise));
+          })
+        );
+      default:
+        continue;
+    }
   }
 }

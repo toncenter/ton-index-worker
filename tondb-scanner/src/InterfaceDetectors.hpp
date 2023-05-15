@@ -10,6 +10,8 @@
 #include "td/actor/MultiPromise.h"
 #include "convert-utils.h"
 #include "InsertManager.h"
+#include "tokens.h"
+#include "crypto/block/block-parse.h"
 
 enum SmcInterface {
   IT_JETTON_MASTER,
@@ -134,9 +136,10 @@ public:
     data.total_supply = stack[0].as_int()->to_long();
     data.mintable = stack[1].as_int()->to_long() != 0;
     auto admin_address = convert::to_raw_address(stack[2].as_slice());
-    if (admin_address.is_ok()) { // some jettons set unparsable address as admin address to revoke ownership (some others set it to zero address)
-      data.admin_address = admin_address.move_as_ok();
+    if (admin_address.is_error()) {
+      promise.set_error(td::Status::Error(204, "get_jetton_data address parsing failed"));
     }
+    data.admin_address = admin_address.move_as_ok();
     data.last_transaction_lt = last_tx_lt;
     data.data_hash = data_cell->get_hash();
     data.code_boc = td::base64_encode(vm::std_boc_serialize(code_cell).move_as_ok());
@@ -336,16 +339,118 @@ public:
     data.code_hash = code_cell->get_hash();
     data.data_hash = data_cell->get_hash();
 
-    if (stack[3].as_cell()->get_hash() != code_cell->get_hash()) {
+    // if (stack[3].as_cell()->get_hash() != code_cell->get_hash()) {
       // LOG(WARNING) << "Jetton Wallet code hash mismatch: " << stack[3].as_cell()->get_hash().to_hex() << " != " << code_cell->get_hash().to_hex();
-    }
+    // }
 
     verify_belonging_to_master(std::move(data), std::move(promise));
+  }
+
+  void parse_transfer(schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<JettonTransfer> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, transaction, cs = std::move(cs), promise = std::move(promise)](td::Result<JettonWalletData> R) mutable {
+      if (R.is_error()) {
+        promise.set_error(R.move_as_error());
+        return;
+      }
+      td::actor::send_closure(SelfId, &JettonWalletDetector::parse_transfer_impl, transaction, std::move(cs), std::move(promise));
+    });
+
+    check_cache(block::StdAddress::parse(transaction.account).move_as_ok(), std::move(P));
+  }
+
+  void parse_transfer_impl(schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<JettonTransfer> promise) {
+    tokens::gen::InternalMsgBody::Record_transfer transfer_record;
+    if (!tlb::csr_unpack(cs, transfer_record)) {
+      promise.set_error(td::Status::Error(204, "Failed to unpack transfer"));
+      return;
+    }
+
+    JettonTransfer transfer;
+    transfer.transaction_hash = transaction.hash;
+    transfer.query_id = transfer_record.query_id;
+    transfer.amount = block::tlb::t_VarUInteger_16.as_integer(transfer_record.amount);
+    if (transfer.amount.is_null()) {
+      promise.set_error(td::Status::Error(204, "Failed to unpack transfer amount"));
+      return;
+    }
+    auto destination = convert::to_raw_address(transfer_record.destination);
+    if (destination.is_error()) {
+      promise.set_error(destination.move_as_error());
+    }
+    transfer.destination = destination.move_as_ok();
+    auto response_destination = convert::to_raw_address(transfer_record.response_destination);
+    if (response_destination.is_error()) {
+      promise.set_error(destination.move_as_error());
+    }
+    transfer.response_destination = response_destination.move_as_ok();
+    if (!transfer_record.custom_payload.write().fetch_maybe_ref(transfer.custom_payload)) {
+      promise.set_error(td::Status::Error(204, "Failed to fetch custom payload"));
+      return;
+    }
+    transfer.forward_ton_amount = block::tlb::t_VarUInteger_16.as_integer(transfer_record.forward_ton_amount);
+    if (!transfer_record.forward_payload.write().fetch_maybe_ref(transfer.forward_payload)) {
+      promise.set_error(td::Status::Error(204, "Failed to fetch forward payload"));
+      return;
+    }
+
+    promise.set_value(std::move(transfer));
+  }
+
+  void parse_burn(schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<JettonBurn> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, transaction, cs = std::move(cs), promise = std::move(promise)](td::Result<JettonWalletData> R) mutable {
+      if (R.is_error()) {
+        promise.set_error(R.move_as_error());
+        return;
+      }
+      td::actor::send_closure(SelfId, &JettonWalletDetector::parse_burn_impl, transaction, std::move(cs), std::move(promise));
+    });
+
+    check_cache(block::StdAddress::parse(transaction.account).move_as_ok(), std::move(P));
+  }
+
+  void parse_burn_impl(schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<JettonBurn> promise) {
+    tokens::gen::InternalMsgBody::Record_burn burn_record;
+    if (!tlb::csr_unpack(cs, burn_record)) {
+      promise.set_error(td::Status::Error(204, "Failed to unpack burn"));
+      return;
+    }
+
+    JettonBurn burn;
+    burn.transaction_hash = transaction.hash;
+    burn.query_id = burn_record.query_id;
+    burn.amount = block::tlb::t_VarUInteger_16.as_integer(burn_record.amount);
+    if (burn.amount.is_null()) {
+      promise.set_error(td::Status::Error(204, "Failed to unpack burn amount"));
+      return;
+    }
+    auto response_destination = convert::to_raw_address(burn_record.response_destination);
+    if (response_destination.is_error()) {
+      promise.set_error(response_destination.move_as_error());
+      return;
+    }
+    burn.response_destination = response_destination.move_as_ok();
+    if (!burn_record.custom_payload.write().fetch_maybe_ref(burn.custom_payload)) {
+      promise.set_error(td::Status::Error(204, "Failed to fetch custom payload"));
+      return;
+    }
+
+    promise.set_value(std::move(burn));
   }
 
 private:
   // check belonging of address to Jetton Master by calling get_wallet_address
   void verify_belonging_to_master(JettonWalletData data, td::Promise<JettonWalletData> &&promise) {
+    auto master_addr = block::StdAddress::parse(data.jetton);
+    if (master_addr.is_error()) {
+      promise.set_error(master_addr.move_as_error_prefix(PSLICE() << "Failed to parse jetton master address (" << data.jetton << "): "));
+      return;
+    }
+    auto owner_addr = block::StdAddress::parse(data.owner);
+    if (owner_addr.is_error()) {
+      promise.set_error(owner_addr.move_as_error_prefix(PSLICE() << "Failed to parse jetton owner address (" << data.owner << "): "));
+      return;
+    }
+
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, data, promise = std::move(promise)](td::Result<block::StdAddress> R) mutable {
       if (R.is_error()) {
         if (R.error().code() == 404) {
@@ -370,10 +475,7 @@ private:
       }
     });
 
-    //TODO: handle address parsing errors
-    block::StdAddress master_addr = block::StdAddress::parse(data.jetton).move_as_ok();
-    block::StdAddress owner_addr = block::StdAddress::parse(data.owner).move_as_ok();
-    td::actor::send_closure(jetton_master_detector_, &JettonMasterDetector::get_wallet_address, master_addr, owner_addr, std::move(P));
+    td::actor::send_closure(jetton_master_detector_, &JettonMasterDetector::get_wallet_address, master_addr.move_as_ok(), owner_addr.move_as_ok(), std::move(P));
   }
 
   void check_cache(block::StdAddress address, td::Promise<JettonWalletData> promise) {

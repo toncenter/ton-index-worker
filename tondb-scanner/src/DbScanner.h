@@ -20,7 +20,7 @@ private:
   
   std::queue<int> seqnos_to_process_;
   std::set<int> seqnos_in_progress_;
-  int max_parallel_fetch_actors_{2000};
+  int max_parallel_fetch_actors_{200};
   int last_known_seqno_{-1};
 
 public:
@@ -52,7 +52,7 @@ private:
   void catch_up_with_primary();
   void schedule_for_processing();
   void seqno_fetched(int mc_seqno, td::Result<MasterchainBlockDataState> blocks_data_state);
-  void seqno_parsed(int mc_seqno, td::Result<ParsedBlock> parsed_block);
-  void interfaces_processed(int mc_seqno, ParsedBlock parsed_block);
+  void seqno_parsed(int mc_seqno, td::Result<ParsedBlockPtr> parsed_block);
+  void interfaces_processed(int mc_seqno, ParsedBlockPtr parsed_block, td::Result<td::Unit> result);
   void reschedule_seqno(int mc_seqno);
 };
