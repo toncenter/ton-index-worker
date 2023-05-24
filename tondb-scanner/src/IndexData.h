@@ -6,16 +6,13 @@
 #include "validator/interfaces/shard.h"
 #include "SchemaPostgres.h"
 
-// struct JettonContent {
-
-// };
 
 struct JettonMasterData {
   std::string address;
   uint64_t total_supply;
   bool mintable;
   td::optional<std::string> admin_address;
-  // JettonContent jetton_content;
+  td::optional<std::map<std::string, std::string>> jetton_content;
   vm::CellHash jetton_wallet_code_hash;
   vm::CellHash data_hash;
   vm::CellHash code_hash;
@@ -23,7 +20,6 @@ struct JettonMasterData {
   std::string code_boc;
   std::string data_boc;
 };
-
 
 struct JettonWalletData {
   uint64_t balance;
@@ -54,6 +50,30 @@ struct JettonBurn {
   td::Ref<vm::Cell> custom_payload;
 };
 
+struct NFTCollectionData {
+  std::string address;
+  uint64_t next_item_index;
+  td::optional<std::string> owner_address;
+  td::optional<std::map<std::string, std::string>> collection_content;
+  vm::CellHash data_hash;
+  vm::CellHash code_hash;
+  uint64_t last_transaction_lt;
+  std::string code_boc;
+  std::string data_boc;
+};
+
+struct NFTItemData {
+  std::string address;
+  bool init;
+  uint64_t index;
+  td::optional<std::string> collection_address;
+  std::string owner_address;
+  std::string content;
+  uint64_t last_transaction_lt;
+  vm::CellHash code_hash;
+  vm::CellHash data_hash;
+};
+
 
 struct BlockDataState {
   td::Ref<ton::validator::BlockData> block_data;
@@ -74,6 +94,7 @@ struct ParsedBlock {
   std::vector<schema::AccountState> account_states_;
 
   std::vector<BlockchainEvent> events_;
+  
   template <class T>
   std::vector<T> get_events() {
     std::vector<T> result;

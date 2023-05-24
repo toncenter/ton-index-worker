@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
 
 
   // SET_VERBOSITY_LEVEL(VERBOSITY_NAME(DEBUG));
-  td::actor::Scheduler scheduler({8});
+  td::actor::Scheduler scheduler({32});
   scheduler.run_in_context([&] { insert_manager = td::actor::create_actor<InsertManagerPostgres>("insertmanager"); });
   scheduler.run_in_context([&] { parse_manager = td::actor::create_actor<ParseManager>("parsemanager"); });
   scheduler.run_in_context([&] { scanner = td::actor::create_actor<DbScanner>("scanner", insert_manager.get(), parse_manager.get()); });

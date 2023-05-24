@@ -1,5 +1,6 @@
 #include <pqxx/pqxx>
 #include <chrono>
+#include "td/utils/JsonBuilder.h"
 #include "InsertManagerPostgres.h"
 #include "convert-utils.h"
 
@@ -336,7 +337,7 @@ public:
     try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) {
-        promise_.set_error(td::Status::Error("Failed to open database"));
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
         stop();
         return;
       }
@@ -351,7 +352,7 @@ public:
       txn.commit();
       promise_.set_value(td::Unit());
     } catch (const std::exception &e) {
-      promise_.set_error(td::Status::Error(PSLICE() << "Error inserting to PG: " << e.what()));
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error inserting to PG: " << e.what()));
     }
     stop();
   }
@@ -376,7 +377,7 @@ public:
     try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) {
-        promise_.set_error(td::Status::Error("Failed to open database"));
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
         stop();
         return;
       }
@@ -407,7 +408,7 @@ public:
       txn.commit();
       promise_.set_value(td::Unit());
     } catch (const std::exception &e) {
-      promise_.set_error(td::Status::Error(PSLICE() << "Error inserting to PG: " << e.what()));
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error inserting to PG: " << e.what()));
     }
     stop();
   }
@@ -432,7 +433,7 @@ public:
     try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) {
-        promise_.set_error(td::Status::Error("Failed to open database"));
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
         stop();
         return;
       }
@@ -446,9 +447,9 @@ public:
 
       if (result.size() != 1) {
         if (result.size() == 0) {
-          promise_.set_error(td::Status::Error(404, PSLICE() << "Jetton Wallet for address " << address_ << " not found"));
+          promise_.set_error(td::Status::Error(ErrorCode::NOT_FOUND_ERROR, PSLICE() << "Jetton Wallet for address " << address_ << " not found"));
         } else {
-          promise_.set_error(td::Status::Error(503, PSLICE() << "Jetton Wallet for address " << address_ << " is not unique (found " << result.size() << " wallets)"));
+          promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Jetton Wallet for address " << address_ << " is not unique (found " << result.size() << " wallets)"));
         }
         stop();
         return;
@@ -468,7 +469,7 @@ public:
       txn.commit();
       promise_.set_value(std::move(wallet));
     } catch (const std::exception &e) {
-      promise_.set_error(td::Status::Error(PSLICE() << "Error retrieving wallet from PG: " << e.what()));
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error retrieving wallet from PG: " << e.what()));
     }
     stop();
   }
@@ -488,24 +489,39 @@ public:
     LOG(DEBUG) << "Created UpsertJettonMaster";
   }
 
+  td::optional<std::string> prepare_jetton_content(JettonMasterData &master_data) {
+    if (!master_data.jetton_content) {
+      return {};
+    }
+    td::JsonBuilder jetton_content_json;
+    auto obj = jetton_content_json.enter_object();
+    for (auto &attr : master_data.jetton_content.value()) {
+      obj(attr.first, attr.second);
+    }
+    obj.leave();
+
+    return jetton_content_json.string_builder().as_cslice().str();
+  }
+
   void start_up() override {
     try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) {
-        promise_.set_error(td::Status::Error("Failed to open database"));
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
         stop();
         return;
       }
       pqxx::work txn(c);
 
       std::string query = "INSERT INTO jetton_masters "
-                          "(address, total_supply, mintable, admin_address, jetton_wallet_code_hash, data_hash, code_hash, last_transaction_lt, code_boc, data_boc) "
-                          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
+                          "(address, total_supply, mintable, admin_address, jetton_content, jetton_wallet_code_hash, data_hash, code_hash, last_transaction_lt, code_boc, data_boc) "
+                          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) "
                           "ON CONFLICT (address) "
                           "DO UPDATE SET "
                           "total_supply = EXCLUDED.total_supply, "
                           "mintable = EXCLUDED.mintable, "
                           "admin_address = EXCLUDED.admin_address, "
+                          "jetton_content = EXCLUDED.jetton_content,"
                           "jetton_wallet_code_hash = EXCLUDED.jetton_wallet_code_hash, "
                           "data_hash = EXCLUDED.data_hash, "
                           "code_hash = EXCLUDED.code_hash, "
@@ -514,11 +530,14 @@ public:
                           "data_boc = EXCLUDED.data_boc "
                           "WHERE jetton_masters.last_transaction_lt < EXCLUDED.last_transaction_lt;";
 
+      auto jetton_content = prepare_jetton_content(master_data_);
+
       txn.exec_params(query,
                       master_data_.address,
                       master_data_.total_supply,
                       master_data_.mintable,
                       master_data_.admin_address ? master_data_.admin_address.value().c_str() : nullptr,
+                      jetton_content ? jetton_content.value().c_str() : nullptr,
                       td::base64_encode(master_data_.jetton_wallet_code_hash.as_slice()),
                       td::base64_encode(master_data_.data_hash.as_slice()),
                       td::base64_encode(master_data_.code_hash.as_slice()),
@@ -529,7 +548,7 @@ public:
       txn.commit();
       promise_.set_value(td::Unit());
     } catch (const std::exception &e) {
-      promise_.set_error(td::Status::Error(PSLICE() << "Error inserting to PG: " << e.what()));
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error inserting to PG: " << e.what()));
     }
     stop();
   }
@@ -553,7 +572,7 @@ public:
     try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) {
-        promise_.set_error(td::Status::Error("Failed to open database"));
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
         stop();
         return;
       }
@@ -567,9 +586,9 @@ public:
 
       if (result.size() != 1) {
         if (result.size() == 0) {
-          promise_.set_error(td::Status::Error(404, PSLICE() << "Jetton master not found: " << address_));
+          promise_.set_error(td::Status::Error(ErrorCode::NOT_FOUND_ERROR, PSLICE() << "Jetton master not found: " << address_));
         } else {
-          promise_.set_error(td::Status::Error(503, PSLICE() << "Jetton master not unique: " << address_ << ", found " << result.size() << " records"));
+          promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Jetton master not unique: " << address_ << ", found " << result.size() << " records"));
         }
         
         stop();
@@ -595,7 +614,262 @@ public:
       txn.commit();
       promise_.set_value(std::move(master_data));
     } catch (const std::exception &e) {
-      promise_.set_error(td::Status::Error(PSLICE() << "Error retrieving master from PG: " << e.what()));
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error retrieving master from PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
+class UpsertNFTCollection: public td::actor::Actor {
+private:
+  std::string connection_string_;
+  NFTCollectionData collection_;
+  td::Promise<td::Unit> promise_;
+
+public:
+  UpsertNFTCollection(std::string connection_string, NFTCollectionData collection, td::Promise<td::Unit> promise)
+    : connection_string_(std::move(connection_string))
+    , collection_(std::move(collection))
+    , promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created UpsertNFTCollection";
+  }
+
+  td::optional<std::string> prepare_collection_content(NFTCollectionData &collection) {
+    if (!collection.collection_content) {
+      return {};
+    }
+    td::JsonBuilder collection_content_json;
+    auto obj = collection_content_json.enter_object();
+    for (auto &attr : collection.collection_content.value()) {
+      obj(attr.first, attr.second);
+    }
+    obj.leave();
+
+    return collection_content_json.string_builder().as_cslice().str();
+  }
+
+  void start_up() override {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+
+      std::string query = "INSERT INTO nft_collections "
+                          "(address, next_item_index, owner_address, collection_content, data_hash, code_hash, last_transaction_lt, code_boc, data_boc) "
+                          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) "
+                          "ON CONFLICT (address) "
+                          "DO UPDATE SET "
+                          "next_item_index = EXCLUDED.next_item_index, "
+                          "owner_address = EXCLUDED.owner_address, "
+                          "collection_content = EXCLUDED.collection_content, "
+                          "data_hash = EXCLUDED.data_hash, "
+                          "code_hash = EXCLUDED.code_hash, "
+                          "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+                          "code_boc = EXCLUDED.code_boc, "
+                          "data_boc = EXCLUDED.data_boc "
+                          "WHERE nft_collections.last_transaction_lt < EXCLUDED.last_transaction_lt;";
+
+      auto collection_content = prepare_collection_content(collection_);
+
+      txn.exec_params(query,
+                      collection_.address,
+                      collection_.next_item_index,
+                      collection_.owner_address ? collection_.owner_address.value().c_str() : nullptr,
+                      collection_content ? collection_content.value().c_str() : nullptr,
+                      td::base64_encode(collection_.data_hash.as_slice()),
+                      td::base64_encode(collection_.code_hash.as_slice()),
+                      collection_.last_transaction_lt,
+                      collection_.code_boc,
+                      collection_.data_boc);
+
+      txn.commit();
+      promise_.set_value(td::Unit());
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error inserting to PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
+class GetNFTCollection : public td::actor::Actor {
+private:
+  std::string connection_string_;
+  std::string address_;
+  td::Promise<NFTCollectionData> promise_;
+public:
+  GetNFTCollection(std::string connection_string, std::string address, td::Promise<NFTCollectionData> promise)
+    : connection_string_(std::move(connection_string))
+    , address_(std::move(address))
+    , promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created GetNFTCollection";
+  }
+
+  void start_up() override {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+
+      std::string query = "SELECT address, next_item_index, owner_address, collection_content, data_hash, code_hash, last_transaction_lt, code_boc, data_boc "
+                          "FROM nft_collections "
+                          "WHERE address = $1;";
+
+      pqxx::result result = txn.exec_params(query, address_);
+
+      if (result.size() != 1) {
+        if (result.size() == 0) {
+          promise_.set_error(td::Status::Error(ErrorCode::NOT_FOUND_ERROR, PSLICE() << "NFT Collection not found: " << address_));
+        } else {
+          promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "NFT Collection not unique: " << address_ << ", found " << result.size() << " records"));
+        }
+        
+        stop();
+        return;
+      }
+
+      pqxx::row row = result[0];
+
+      NFTCollectionData collection_data;
+      collection_data.address = row[0].as<std::string>();
+      collection_data.next_item_index = row[1].as<uint64_t>();
+      if (!row[2].is_null()) {
+        collection_data.owner_address = row[2].as<std::string>();
+      }
+      if (!row[3].is_null()) {
+        // TODO: Parse the JSON string into a map
+      }
+      collection_data.data_hash = vm::CellHash::from_slice(td::base64_decode(row[4].as<std::string>()).move_as_ok());
+      collection_data.code_hash = vm::CellHash::from_slice(td::base64_decode(row[5].as<std::string>()).move_as_ok());
+      collection_data.last_transaction_lt = row[6].as<uint64_t>();
+      collection_data.code_boc = row[7].as<std::string>();
+      collection_data.data_boc = row[8].as<std::string>();
+
+      txn.commit();
+      promise_.set_value(std::move(collection_data));
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error retrieving collection from PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
+class UpsertNFTItem : public td::actor::Actor {
+private:
+  std::string connection_string_;
+  NFTItemData item_data_;
+  td::Promise<td::Unit> promise_;
+
+public:
+  UpsertNFTItem(std::string connection_string, NFTItemData item_data, td::Promise<td::Unit> promise)
+    : connection_string_(std::move(connection_string))
+    , item_data_(std::move(item_data))
+    , promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created UpsertNFTItem";
+  }
+
+  void start_up() override {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+
+      std::string query = "INSERT INTO nft_items (address, init, index, collection_address, owner_address, content, last_transaction_lt, code_hash, data_hash) "
+                          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) "
+                          "ON CONFLICT (address) DO UPDATE "
+                          "SET init = $2, index = $3, collection_address = $4, owner_address = $5, content = $6, last_transaction_lt = $7, code_hash = $8, data_hash = $9;";
+
+      txn.exec_params(query,
+                      item_data_.address,
+                      item_data_.init,
+                      item_data_.index,
+                      item_data_.collection_address ? item_data_.collection_address.value().c_str() : nullptr,
+                      item_data_.owner_address,
+                      item_data_.content,
+                      item_data_.last_transaction_lt,
+                      td::base64_encode(item_data_.code_hash.as_slice().str()),
+                      td::base64_encode(item_data_.data_hash.as_slice().str()));
+      txn.commit();
+      promise_.set_value(td::Unit());
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error inserting/updating NFT item in PG: " << e.what()));
+    }
+    stop();
+  }
+};
+
+class GetNFTItem : public td::actor::Actor {
+private:
+  std::string connection_string_;
+  std::string address_;
+  td::Promise<NFTItemData> promise_;
+
+public:
+  GetNFTItem(std::string connection_string, std::string address, td::Promise<NFTItemData> promise)
+    : connection_string_(std::move(connection_string))
+    , address_(std::move(address))
+    , promise_(std::move(promise))
+  {
+    LOG(DEBUG) << "Created GetNFTItem";
+  }
+
+  void start_up() override {
+    try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) {
+        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to open database"));
+        stop();
+        return;
+      }
+      pqxx::work txn(c);
+
+      std::string query = "SELECT address, init, index, collection_address, owner_address, content, last_transaction_lt, code_hash, data_hash "
+                          "FROM nft_items "
+                          "WHERE address = $1;";
+
+      pqxx::result result = txn.exec_params(query, address_);
+
+      if (result.size() != 1) {
+        if (result.empty()) {
+          promise_.set_error(td::Status::Error(ErrorCode::NOT_FOUND_ERROR, "NFT item not found"));
+        } else {
+          promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Multiple NFT items found with same address"));
+        }
+        stop();
+        return;
+      }
+
+      NFTItemData item_data;
+      const pqxx::row &row = result[0];
+      item_data.address = row[0].as<std::string>();
+      item_data.init = row[1].as<bool>();
+      item_data.index = row[2].as<uint64_t>();
+      if (!row[3].is_null()) {
+        item_data.collection_address = row[3].as<std::string>();
+      }
+      item_data.owner_address = row[4].as<std::string>();
+      item_data.content = row[5].as<std::string>();
+      item_data.last_transaction_lt = row[6].as<uint64_t>();
+      item_data.code_hash = vm::CellHash::from_slice(td::base64_decode(row[7].as<std::string>()).move_as_ok());
+      item_data.data_hash = vm::CellHash::from_slice(td::base64_decode(row[8].as<std::string>()).move_as_ok());
+
+      promise_.set_value(std::move(item_data));
+    } catch (const std::exception &e) {
+      promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error retrieving item from PG: " << e.what()));
     }
     stop();
   }
@@ -690,6 +964,22 @@ void InsertManagerPostgres::upsert_jetton_master(JettonMasterData jetton_wallet,
 
 void InsertManagerPostgres::get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) {
   td::actor::create_actor<GetJettonMaster>("getjettonmaster", credential.getConnectionString(), std::move(address), std::move(promise)).release();
+}
+
+void InsertManagerPostgres::upsert_nft_collection(NFTCollectionData nft_collection, td::Promise<td::Unit> promise) {
+  td::actor::create_actor<UpsertNFTCollection>("upsertnftcollection", credential.getConnectionString(), std::move(nft_collection), std::move(promise)).release();
+}
+
+void InsertManagerPostgres::get_nft_collection(std::string address, td::Promise<NFTCollectionData> promise) {
+  td::actor::create_actor<GetNFTCollection>("getnftcollection", credential.getConnectionString(), std::move(address), std::move(promise)).release();
+}
+
+void InsertManagerPostgres::upsert_nft_item(NFTItemData nft_item, td::Promise<td::Unit> promise) {
+  td::actor::create_actor<UpsertNFTItem>("upsertnftitem", credential.getConnectionString(), std::move(nft_item), std::move(promise)).release();
+}
+
+void InsertManagerPostgres::get_nft_item(std::string address, td::Promise<NFTItemData> promise) {
+  td::actor::create_actor<GetNFTItem>("getnftitem", credential.getConnectionString(), std::move(address), std::move(promise)).release();
 }
 
 std::string InsertManagerPostgres::PostgresCredential::getConnectionString()  {

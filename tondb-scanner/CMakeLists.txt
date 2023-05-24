@@ -5,7 +5,7 @@ add_executable(tondb-scanner
     src/InsertManagerPostgres.cpp
     src/DbScanner.cpp
     src/DataParser.cpp
-    src/InterfaceDetectors.hpp
+    src/parse_token_data.cpp
     src/EventProcessor.cpp
     src/convert-utils.cpp
     src/tokens.cpp
@@ -47,7 +47,7 @@ add_executable(tondb-scanner-test
     src/InsertManagerPostgres.cpp
     src/DbScanner.cpp
     src/DataParser.cpp
-    src/InterfaceDetectors.hpp
+    src/parse_token_data.cpp
     src/EventProcessor.cpp
     src/convert-utils.cpp
     src/tokens.cpp
