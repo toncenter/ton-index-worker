@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 add_executable(tondb-scanner 
     src/main.cpp
+    src/InsertManager.cpp
     src/InsertManagerPostgres.cpp
     src/DbScanner.cpp
     src/DataParser.cpp
@@ -44,6 +45,7 @@ add_custom_command(
 
 add_executable(tondb-scanner-test
     ../external/ton/test/test-td-main.cpp
+    src/InsertManager.cpp
     src/InsertManagerPostgres.cpp
     src/DbScanner.cpp
     src/DataParser.cpp

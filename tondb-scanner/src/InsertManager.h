@@ -24,4 +24,11 @@ public:
 
   virtual void upsert_nft_item(NFTItemData nft_item, td::Promise<td::Unit> promise) = 0;
   virtual void get_nft_item(std::string address, td::Promise<NFTItemData> promise) = 0;
+
+  // helper template functions
+  template <class T>
+  void upsert_entity(T entity, td::Promise<td::Unit> promise);
+
+  template <class T>
+  void get_entity(std::string address, td::Promise<T> promise);
 };

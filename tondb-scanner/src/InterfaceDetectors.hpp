@@ -51,17 +51,64 @@ public:
   virtual ~InterfaceDetector() = default;
 };
 
+template <class T>
+class CacheManager {
+public:
+  std::map<std::string, T> cache_{};
+  td::actor::ActorId<InsertManagerInterface> insert_manager_;
+
+  CacheManager(td::actor::ActorId<InsertManagerInterface> insert_manager) 
+    : insert_manager_(insert_manager) {
+  }
+
+  void check_cache(block::StdAddress address, td::Promise<T> promise) {
+    auto it = cache_.find(convert::to_raw_address(address));
+    if (it != cache_.end()) {
+      auto res = it->second;
+      promise.set_value(std::move(res));
+      return;
+    }
+    // You need to implement get_data() in the child class
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_entity<T>, convert::to_raw_address(address), 
+                            promise.wrap([this, address](td::Result<T> r_data) mutable -> td::Result<T> {
+      if (r_data.is_error()) {
+        return r_data.move_as_error();
+      }
+      auto data = r_data.move_as_ok();
+      cache_.emplace(convert::to_raw_address(address), data);
+      return data;
+    }));
+  }
+
+  td::Status add_to_cache(block::StdAddress address, T data) {
+    cache_.emplace(convert::to_raw_address(address), data);
+    
+    auto P = td::PromiseCreator::lambda([this, address](td::Result<td::Unit> r_unit) mutable {
+      if (r_unit.is_error()) {
+        LOG(ERROR) << "Failed to add to db: " << r_unit.move_as_error();
+        return;
+      }
+    });
+    // You need to implement upsert_data() in the child class
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_entity<T>, data, std::move(P));
+
+    return td::Status::OK();
+  }
+};
+
 
 /// @brief Detects Jetton Master according to TEP 74
 /// Checks that get_jetton_data() returns (int total_supply, int mintable, slice admin_address, cell jetton_content, cell jetton_wallet_code)
-class JettonMasterDetector: public InterfaceDetector<JettonMasterData> {
+class JettonMasterDetector: public InterfaceDetector<JettonMasterData>,
+                            public CacheManager<JettonMasterData> {
 private:
   std::map<std::string, JettonMasterData> cache_{};
   td::actor::ActorId<InterfaceManager> interface_manager_;
   td::actor::ActorId<InsertManagerInterface> insert_manager_;
 public:
   JettonMasterDetector(td::actor::ActorId<InterfaceManager> interface_manager, td::actor::ActorId<InsertManagerInterface> insert_manager) 
-    : interface_manager_(interface_manager)
+    : CacheManager<JettonMasterData>(insert_manager)
+    , interface_manager_(interface_manager)
     , insert_manager_(insert_manager) {
   }
 
@@ -210,44 +257,17 @@ public:
     }
     P.set_result(block::StdAddress::parse(wallet_address.move_as_ok()));
   }
-private:
-  void check_cache(block::StdAddress address, td::Promise<JettonMasterData> promise) {
-    auto it = cache_.find(convert::to_raw_address(address));
-    if (it != cache_.end()) {
-      auto res = it->second;
-      promise.set_value(std::move(res));
-      return;
-    }
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_master, convert::to_raw_address(address), 
-                            promise.wrap([SelfId = actor_id(this), this, address](td::Result<JettonMasterData> r_data) mutable -> td::Result<JettonMasterData> {
-      if (r_data.is_error()) {
-        return r_data.move_as_error();
-      }
-      auto data = r_data.move_as_ok();
-      cache_.emplace(convert::to_raw_address(address), data);
-      return data;
-    }));
-  }
 
-  td::Status add_to_cache(block::StdAddress address, JettonMasterData data) {
-    cache_.emplace(convert::to_raw_address(address), data);
-    
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address](td::Result<td::Unit> r_unit) mutable {
-      if (r_unit.is_error()) {
-        LOG(ERROR) << "Failed to add jetton master to db: " << r_unit.move_as_error();
-        return;
-      }
-    });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_jetton_master, data, std::move(P));
-
-    return td::Status::OK();
+  void get_data(block::StdAddress address, td::Promise<JettonMasterData> promise) {
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_master, convert::to_raw_address(address), std::move(promise)); 
   }
 };
 
 /// @brief Detects Jetton Wallet according to TEP 74
 /// Checks that get_wallet_data() returns (int balance, slice owner, slice jetton, cell jetton_wallet_code) 
 /// and corresponding jetton master recognizes this wallet
-class JettonWalletDetector: public InterfaceDetector<JettonWalletData> {
+class JettonWalletDetector: public InterfaceDetector<JettonWalletData>,
+                            public CacheManager<JettonWalletData> {
 private:
   std::map<std::string, JettonWalletData> cache_{};
   td::actor::ActorId<JettonMasterDetector> jetton_master_detector_;
@@ -257,7 +277,10 @@ public:
   JettonWalletDetector(td::actor::ActorId<JettonMasterDetector> jetton_master_detector,
                        td::actor::ActorId<InterfaceManager> interface_manager,
                        td::actor::ActorId<InsertManagerInterface> insert_manager) 
-    : jetton_master_detector_(jetton_master_detector), interface_manager_(interface_manager), insert_manager_(insert_manager) {
+    : CacheManager<JettonWalletData>(insert_manager)
+    , jetton_master_detector_(jetton_master_detector)
+    , interface_manager_(interface_manager)
+    , insert_manager_(insert_manager) {
   }
 
   void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, td::Promise<JettonWalletData> promise) override {
@@ -450,8 +473,12 @@ public:
     promise.set_value(std::move(burn));
   }
 
+  void get_data(block::StdAddress address, td::Promise<JettonWalletData> promise) {
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_wallet, convert::to_raw_address(address), std::move(promise)); 
+  }
+
 private:
-  // check belonging of address to Jetton Master by calling get_wallet_address
+  // checks belonging of address to Jetton Master by calling get_wallet_address
   void verify_belonging_to_master(JettonWalletData data, td::Promise<JettonWalletData> &&promise) {
     auto master_addr = block::StdAddress::parse(data.jetton);
     if (master_addr.is_error()) {
@@ -470,7 +497,7 @@ private:
           // Jetton master is not available, so we can't verify address.
           // We will add it to cache and return it as is.
           // TODO: figure out what to do in this case properly
-          td::actor::send_closure(SelfId, &JettonWalletDetector::add_to_cache, block::StdAddress::parse(data.address).move_as_ok(), data);
+          add_to_cache(block::StdAddress::parse(data.address).move_as_ok(), data);
           promise.set_value(std::move(data));
         } else {
           LOG(ERROR) << "Failed to get wallet address from master: " << R.error();
@@ -482,7 +509,7 @@ private:
           LOG(ERROR) << "Jetton Master returned wrong address: " << convert::to_raw_address(address);
           promise.set_error(td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "Couldn't verify Jetton Wallet. Possibly scam."));
         } else {
-          td::actor::send_closure(SelfId, &JettonWalletDetector::add_to_cache, address, data);
+          add_to_cache(address, data);
           promise.set_value(std::move(data));
         }
       }
@@ -490,51 +517,21 @@ private:
 
     td::actor::send_closure(jetton_master_detector_, &JettonMasterDetector::get_wallet_address, master_addr.move_as_ok(), owner_addr.move_as_ok(), std::move(P));
   }
-
-  void check_cache(block::StdAddress address, td::Promise<JettonWalletData> promise) {
-    auto it = cache_.find(convert::to_raw_address(address));
-    if (it != cache_.end()) {
-      auto res = it->second;
-      promise.set_value(std::move(res));
-      return;
-    }
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_wallet, convert::to_raw_address(address), 
-                            promise.wrap([SelfId = actor_id(this), this, address](td::Result<JettonWalletData> r_data) mutable -> td::Result<JettonWalletData> {
-      if (r_data.is_error()) {
-        return r_data.move_as_error();
-      }
-      auto data = r_data.move_as_ok();
-      cache_.emplace(convert::to_raw_address(address), data);
-      return data;
-    }));
-  }
-
-  td::Status add_to_cache(block::StdAddress address, JettonWalletData data) {
-    cache_.emplace(convert::to_raw_address(address), data);
-    
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address](td::Result<td::Unit> r_unit) mutable {
-      if (r_unit.is_error()) {
-        LOG(ERROR) << "Failed to add jetton wallet to db: " << r_unit.move_as_error();
-        return;
-      }
-    });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_jetton_wallet, data, std::move(P));
-
-    return td::Status::OK();
-  }
 };
 
 
 /// @brief Detects NFT Collection according to your specific standard
 /// Checks that get_collection_data() returns (int next_item_index, cell collection_content, slice owner_address)
-class NFTCollectionDetector: public InterfaceDetector<NFTCollectionData> {
+class NFTCollectionDetector: public InterfaceDetector<NFTCollectionData>,
+                             public CacheManager<NFTCollectionData> {
 private:
   std::map<std::string, NFTCollectionData> cache_{};
   td::actor::ActorId<InterfaceManager> interface_manager_;
   td::actor::ActorId<InsertManagerInterface> insert_manager_;
 public:
   NFTCollectionDetector(td::actor::ActorId<InterfaceManager> interface_manager, td::actor::ActorId<InsertManagerInterface> insert_manager) 
-    : interface_manager_(interface_manager)
+    : CacheManager<NFTCollectionData>(insert_manager)
+    , interface_manager_(interface_manager)
     , insert_manager_(insert_manager) {
   }
 
@@ -631,35 +628,7 @@ private:
     promise.set_value(std::move(data));
   }
 
-  void check_cache(block::StdAddress address, td::Promise<NFTCollectionData> promise) {
-    auto it = cache_.find(convert::to_raw_address(address));
-    if (it != cache_.end()) {
-      auto res = it->second;
-      promise.set_value(std::move(res));
-      return;
-    }
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_nft_collection, convert::to_raw_address(address), 
-                            promise.wrap([SelfId = actor_id(this), this, address](td::Result<NFTCollectionData> r_data) mutable -> td::Result<NFTCollectionData> {
-      if (r_data.is_error()) {
-        return r_data.move_as_error();
-      }
-      auto data = r_data.move_as_ok();
-      cache_.emplace(convert::to_raw_address(address), data);
-      return data;
-    }));
-  }
-
-  td::Status add_to_cache(block::StdAddress address, NFTCollectionData data) {
-    cache_.emplace(convert::to_raw_address(address), data);
-    
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address](td::Result<td::Unit> r_unit) mutable {
-      if (r_unit.is_error()) {
-        LOG(ERROR) << "Failed to add nft collection master to db: " << r_unit.move_as_error();
-        return;
-      }
-    });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_nft_collection, data, std::move(P));
-
-    return td::Status::OK();
+  void get_data(block::StdAddress address, td::Promise<NFTCollectionData> promise) {
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_nft_collection, convert::to_raw_address(address), std::move(promise)); 
   }
 };
