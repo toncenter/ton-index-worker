@@ -17,7 +17,7 @@ addr_var$11 anycast:(Maybe Anycast) addr_len:(## 9)
 _ _:MsgAddressInt = MsgAddress;
 _ _:MsgAddressExt = MsgAddress;
 
-transfer#0f8a7ea5 query_id:uint64 amount:(VarUInteger 16) destination:MsgAddress
+transfer_jetton#0f8a7ea5 query_id:uint64 amount:(VarUInteger 16) destination:MsgAddress
            response_destination:MsgAddress custom_payload:(Maybe ^Cell)
            forward_ton_amount:(VarUInteger 16) forward_payload:(Either Cell ^Cell)
            = InternalMsgBody;
@@ -31,6 +31,10 @@ excesses#d53276db query_id:uint64 = InternalMsgBody;
 burn#595f07bc query_id:uint64 amount:(VarUInteger 16)
        response_destination:MsgAddress custom_payload:(Maybe ^Cell)
        = InternalMsgBody;
+
+transfer_nft#5fcc3d14 query_id:uint64 new_owner:MsgAddress response_destination:MsgAddress
+          custom_payload:(Maybe ^Cell) forward_amount:(VarUInteger 16) 
+          forward_payload:(Either Cell ^Cell) = InternalMsgBody;
 
 // ----- Unspecified by standard, but suggested format of internal message
 

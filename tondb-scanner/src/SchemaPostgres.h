@@ -41,6 +41,7 @@ struct Transaction {
   td::optional<uint64_t> action_total_action_fees;
 
   // for interface parsing (TODO: refactor)
+  td::optional<std::string> in_msg_from;
   td::Ref<vm::Cell> in_msg_body;
 };
 

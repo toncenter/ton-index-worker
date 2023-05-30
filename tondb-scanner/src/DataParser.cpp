@@ -390,6 +390,7 @@ private:
           if (is_just == -1) {
             auto msg = trans.r1.in_msg->prefetch_ref();
             TRY_RESULT(in_msg, parse_message(trans.r1.in_msg->prefetch_ref()));
+            schema_tx.in_msg_from = in_msg.source;
             schema_tx.in_msg_body = in_msg.body_cell;
 
             result->messages_.push_back(in_msg);

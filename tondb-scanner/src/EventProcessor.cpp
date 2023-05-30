@@ -89,6 +89,20 @@ void EventProcessor::process_states(const std::vector<schema::AccountState>& acc
       td::actor::send_closure(interface_manager_, &InterfaceManager::set_interface, code_cell->get_hash(), IT_NFT_COLLECTION, nft_collection_data.is_ok(), std::move(promise));
     });
     td::actor::send_closure(nft_collection_detector_, &NFTCollectionDetector::detect, address, code_cell, data_cell, last_tx_lt, std::move(P3));
+
+    auto P4 = td::PromiseCreator::lambda([this, code_cell, address, promise = ig.get_promise()](td::Result<NFTItemData> nft_item_data) mutable {
+      if (nft_item_data.is_error()) {
+        if (nft_item_data.error().code() != ErrorCode::SMC_INTERFACE_PARSE_ERROR) {
+          LOG(ERROR) << "Failed to detect interface NFT_ITEM for " << convert::to_raw_address(address) << ": " << nft_item_data.move_as_error();
+          promise.set_error(nft_item_data.move_as_error());
+          return;
+        }
+      } else {
+        LOG(DEBUG) << "Detected interface JETTON_WALLET for " << convert::to_raw_address(address);
+      }
+      td::actor::send_closure(interface_manager_, &InterfaceManager::set_interface, code_cell->get_hash(), IT_NFT_ITEM, nft_item_data.is_ok(), std::move(promise));
+    });
+    td::actor::send_closure(nft_item_detector_, &NFTItemDetector::detect, address, code_cell, data_cell, last_tx_lt, std::move(P4));
   }
 }
 
@@ -133,18 +147,27 @@ void EventProcessor::process_transactions(const std::vector<schema::Transaction>
 
     auto cs = vm::load_cell_slice_ref(tx.in_msg_body);
     switch (tokens::gen::t_InternalMsgBody.check_tag(*cs)) {
-      case tokens::gen::InternalMsgBody::transfer: 
+      case tokens::gen::InternalMsgBody::transfer_jetton: 
         td::actor::send_closure(jetton_wallet_detector_, &JettonWalletDetector::parse_transfer, tx, cs, 
           td::PromiseCreator::lambda([events, tx, process, promise = ig.get_promise()](td::Result<JettonTransfer> transfer) mutable { 
             process(std::move(transfer), std::move(promise));
           })
         );
+        break;
       case tokens::gen::InternalMsgBody::burn: 
         td::actor::send_closure(jetton_wallet_detector_, &JettonWalletDetector::parse_burn, tx, cs, 
           td::PromiseCreator::lambda([events, tx, process, promise = ig.get_promise()](td::Result<JettonBurn> burn) mutable { 
             process(std::move(burn), std::move(promise));
           })
         );
+        break;
+      case tokens::gen::InternalMsgBody::transfer_nft: 
+        td::actor::send_closure(nft_item_detector_, &NFTItemDetector::parse_transfer, tx, cs, 
+          td::PromiseCreator::lambda([events, tx, process, promise = ig.get_promise()](td::Result<NFTTransfer> transfer) mutable { 
+            process(std::move(transfer), std::move(promise));
+          })
+        );
+        break;
       default:
         continue;
     }

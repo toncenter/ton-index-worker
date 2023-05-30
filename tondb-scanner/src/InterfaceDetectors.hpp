@@ -68,7 +68,7 @@ public:
       promise.set_value(std::move(res));
       return;
     }
-    // You need to implement get_data() in the child class
+
     td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_entity<T>, convert::to_raw_address(address), 
                             promise.wrap([this, address](td::Result<T> r_data) mutable -> td::Result<T> {
       if (r_data.is_error()) {
@@ -102,7 +102,6 @@ public:
 class JettonMasterDetector: public InterfaceDetector<JettonMasterData>,
                             public CacheManager<JettonMasterData> {
 private:
-  std::map<std::string, JettonMasterData> cache_{};
   td::actor::ActorId<InterfaceManager> interface_manager_;
   td::actor::ActorId<InsertManagerInterface> insert_manager_;
 public:
@@ -257,10 +256,6 @@ public:
     }
     P.set_result(block::StdAddress::parse(wallet_address.move_as_ok()));
   }
-
-  void get_data(block::StdAddress address, td::Promise<JettonMasterData> promise) {
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_master, convert::to_raw_address(address), std::move(promise)); 
-  }
 };
 
 /// @brief Detects Jetton Wallet according to TEP 74
@@ -269,7 +264,6 @@ public:
 class JettonWalletDetector: public InterfaceDetector<JettonWalletData>,
                             public CacheManager<JettonWalletData> {
 private:
-  std::map<std::string, JettonWalletData> cache_{};
   td::actor::ActorId<JettonMasterDetector> jetton_master_detector_;
   td::actor::ActorId<InterfaceManager> interface_manager_;
   td::actor::ActorId<InsertManagerInterface> insert_manager_;
@@ -391,7 +385,7 @@ public:
   }
 
   void parse_transfer_impl(schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<JettonTransfer> promise) {
-    tokens::gen::InternalMsgBody::Record_transfer transfer_record;
+    tokens::gen::InternalMsgBody::Record_transfer_jetton transfer_record;
     if (!tlb::csr_unpack(cs, transfer_record)) {
       promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSE_ERROR, "Failed to unpack transfer"));
       return;
@@ -412,7 +406,7 @@ public:
     transfer.destination = destination.move_as_ok();
     auto response_destination = convert::to_raw_address(transfer_record.response_destination);
     if (response_destination.is_error()) {
-      promise.set_error(destination.move_as_error());
+      promise.set_error(response_destination.move_as_error());
     }
     transfer.response_destination = response_destination.move_as_ok();
     if (!transfer_record.custom_payload.write().fetch_maybe_ref(transfer.custom_payload)) {
@@ -473,10 +467,6 @@ public:
     promise.set_value(std::move(burn));
   }
 
-  void get_data(block::StdAddress address, td::Promise<JettonWalletData> promise) {
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_jetton_wallet, convert::to_raw_address(address), std::move(promise)); 
-  }
-
 private:
   // checks belonging of address to Jetton Master by calling get_wallet_address
   void verify_belonging_to_master(JettonWalletData data, td::Promise<JettonWalletData> &&promise) {
@@ -525,7 +515,6 @@ private:
 class NFTCollectionDetector: public InterfaceDetector<NFTCollectionData>,
                              public CacheManager<NFTCollectionData> {
 private:
-  std::map<std::string, NFTCollectionData> cache_{};
   td::actor::ActorId<InterfaceManager> interface_manager_;
   td::actor::ActorId<InsertManagerInterface> insert_manager_;
 public:
@@ -533,6 +522,11 @@ public:
     : CacheManager<NFTCollectionData>(insert_manager)
     , interface_manager_(interface_manager)
     , insert_manager_(insert_manager) {
+  }
+
+  void get_from_cache(block::StdAddress address, td::Promise<NFTCollectionData> promise) {
+    // TODO: fetch from shards
+    check_cache(address, std::move(promise));
   }
 
   void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, td::Promise<NFTCollectionData> promise) override {
@@ -603,7 +597,7 @@ private:
 
     NFTCollectionData data;
     data.address = convert::to_raw_address(address);
-    data.next_item_index = stack[0].as_int()->to_long();
+    data.next_item_index = stack[0].as_int();
     
     auto owner_address = convert::to_raw_address(stack[2].as_slice());
     if (owner_address.is_error()) {
@@ -627,8 +621,265 @@ private:
 
     promise.set_value(std::move(data));
   }
+};
 
-  void get_data(block::StdAddress address, td::Promise<NFTCollectionData> promise) {
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_nft_collection, convert::to_raw_address(address), std::move(promise)); 
+
+/// @brief Detects NFT Item according to your specific standard
+/// Checks that get_nft_data() returns (int init?, int index, slice collection_address, slice owner_address, cell individual_content)
+class NFTItemDetector: public InterfaceDetector<NFTItemData>,
+                       public CacheManager<NFTItemData> {
+private:
+  td::actor::ActorId<InterfaceManager> interface_manager_;
+  td::actor::ActorId<InsertManagerInterface> insert_manager_;
+  td::actor::ActorId<NFTCollectionDetector> collection_detector_;
+public:
+  NFTItemDetector(td::actor::ActorId<InterfaceManager> interface_manager, td::actor::ActorId<InsertManagerInterface> insert_manager, td::actor::ActorId<NFTCollectionDetector> collection_detector) 
+    : CacheManager<NFTItemData>(insert_manager)
+    , interface_manager_(interface_manager)
+    , insert_manager_(insert_manager)
+    , collection_detector_(collection_detector) {
+  }
+
+  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, td::Promise<NFTItemData> promise) override {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<bool> code_hash_is_collection) mutable {
+      if (code_hash_is_collection.is_error()) {
+        if (code_hash_is_collection.error().code() == ErrorCode::NOT_FOUND_ERROR) { 
+          td::actor::send_closure(SelfId, &NFTItemDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, std::move(promise));
+          return;
+        }
+
+        LOG(ERROR) << "Failed to get interfaces for " << convert::to_raw_address(address) << ": " << code_hash_is_collection.error();
+        promise.set_error(code_hash_is_collection.move_as_error());
+        return;
+      }
+      if (!code_hash_is_collection.move_as_ok()) {
+        promise.set_error(td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "Code hash is not a NFT Collection"));
+        return;
+      }
+
+      td::actor::send_closure(SelfId, &NFTItemDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, std::move(promise));
+    });
+
+    td::actor::send_closure(interface_manager_, &InterfaceManager::check_interface, code_cell->get_hash(), IT_NFT_COLLECTION, std::move(P));
+  }
+
+  void parse_transfer(schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<NFTTransfer> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, transaction, cs = std::move(cs), promise = std::move(promise)](td::Result<NFTItemData> R) mutable {
+      if (R.is_error()) {
+        if (R.error().code() == ErrorCode::NOT_FOUND_ERROR) {
+          promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSE_ERROR, "Jetton Wallet not found"));
+          return;
+        }
+        promise.set_error(R.move_as_error());
+        return;
+      }
+      td::actor::send_closure(SelfId, &NFTItemDetector::parse_transfer_impl, transaction, std::move(cs), std::move(promise));
+    });
+
+    check_cache(block::StdAddress::parse(transaction.account).move_as_ok(), std::move(P));
+  }
+
+  void parse_transfer_impl(schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<NFTTransfer> promise) {
+    tokens::gen::InternalMsgBody::Record_transfer_nft transfer_record;
+    if (!tlb::csr_unpack(cs, transfer_record)) {
+      promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSE_ERROR, "Failed to unpack transfer"));
+      return;
+    }
+
+    NFTTransfer transfer;
+    transfer.transaction_hash = transaction.hash;
+    transfer.query_id = transfer_record.query_id;
+    transfer.nft_item = transaction.account;
+    if (!transaction.in_msg_from) {
+      promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSE_ERROR, "Failed to fetch NFT old owner address"));
+    }
+    transfer.old_owner = transaction.in_msg_from.value();
+    auto new_owner = convert::to_raw_address(transfer_record.new_owner);
+    if (new_owner.is_error()) {
+      promise.set_error(new_owner.move_as_error());
+    }
+    transfer.new_owner = new_owner.move_as_ok();
+    auto response_destination = convert::to_raw_address(transfer_record.response_destination);
+    if (response_destination.is_error()) {
+      promise.set_error(response_destination.move_as_error());
+    }
+    transfer.response_destination = response_destination.move_as_ok();
+    if (!transfer_record.custom_payload.write().fetch_maybe_ref(transfer.custom_payload)) {
+      promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSE_ERROR, "Failed to fetch custom payload"));
+      return;
+    }
+    transfer.forward_amount = block::tlb::t_VarUInteger_16.as_integer(transfer_record.forward_amount);
+    if (!transfer_record.forward_payload.write().fetch_maybe_ref(transfer.forward_payload)) {
+      promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSE_ERROR, "Failed to fetch forward payload"));
+      return;
+    }
+
+    promise.set_value(std::move(transfer));
+  }
+
+private:
+  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt,  td::Promise<NFTItemData> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<NFTItemData> cached_res) mutable {
+      if (cached_res.is_ok()) {
+        auto cached_data = cached_res.move_as_ok();
+        if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
+            || last_tx_lt < cached_data.last_transaction_lt) {
+          promise.set_value(std::move(cached_data)); // data did not not changed from cached or is more actual than requested
+          return;
+        }
+      }
+      td::actor::send_closure(SelfId, &NFTItemDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, std::move(promise));
+    });
+
+    check_cache(address, std::move(P));
+  }
+
+  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt,  td::Promise<NFTItemData> promise) {
+    ton::SmartContract smc({code_cell, data_cell});
+    ton::SmartContract::Args args;
+    args.set_now(td::Time::now());
+    args.set_address(std::move(address));
+
+    args.set_method_id("get_nft_data");
+    auto res = smc.run_get_method(args);
+
+    const int return_stack_size = 5;
+    const vm::StackEntry::Type return_types[return_stack_size] = {vm::StackEntry::Type::t_int, 
+      vm::StackEntry::Type::t_int, vm::StackEntry::Type::t_slice, vm::StackEntry::Type::t_slice, vm::StackEntry::Type::t_cell};
+
+    if (!res.success || res.stack->depth() != return_stack_size) {
+      promise.set_error(td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_data failed"));
+      return;
+    }
+
+    auto stack = res.stack->as_span();
+
+    for (int i = 0; i < return_stack_size; i++) {
+      if (stack[i].type() != return_types[i]) {
+        promise.set_error(td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_data failed"));
+        return;
+      }
+    }
+
+    NFTItemData data;
+    data.address = convert::to_raw_address(address);
+    data.init = stack[0].as_int()->to_long() != 0;
+    data.index = stack[1].as_int();
+    
+    auto collection_address = convert::to_raw_address(stack[2].as_slice());
+    if (collection_address.is_error()) {
+      promise.set_error(td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_data collection address parsing failed"));  
+    }
+    data.collection_address = collection_address.move_as_ok();
+
+    auto owner_address = convert::to_raw_address(stack[3].as_slice());
+    if (owner_address.is_error()) {
+      promise.set_error(td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_data address parsing failed"));
+    }
+    data.owner_address = owner_address.move_as_ok();
+    data.last_transaction_lt = last_tx_lt;
+    data.code_hash = code_cell->get_hash();
+    data.data_hash = data_cell->get_hash();
+    
+    if (data.collection_address == "addr_none") {
+      auto content = parse_token_data(stack[4].as_cell());
+      if (content.is_ok()) {
+        data.content = content.move_as_ok();
+      } else {
+        LOG(ERROR) << "Failed to parse content for " << convert::to_raw_address(address) << ": " << content.error();
+        LOG(ERROR) << convert::to_bytes(stack[4].as_cell()).move_as_ok().value();
+      }
+      add_to_cache(address, data);
+      promise.set_value(std::move(data));
+    } else {
+      auto ind_content = stack[4].as_cell();
+      auto collection_address = block::StdAddress::parse(data.collection_address);
+      if (collection_address.is_error()) {
+        LOG(ERROR) << "Failed to parse collection address for " << convert::to_raw_address(address) << ": " << collection_address.error();
+        promise.set_error(collection_address.move_as_error());
+        return;
+      }
+      td::actor::send_closure(collection_detector_, &NFTCollectionDetector::get_from_cache, collection_address.move_as_ok(), 
+                              td::PromiseCreator::lambda([this, ind_content, address, data, code_cell, data_cell, last_tx_lt, promise = std::move(promise)](td::Result<NFTCollectionData> collection_res) mutable {
+        if (collection_res.is_error()) {
+          LOG(ERROR) << "Failed to get collection for " << convert::to_raw_address(address) << ": " << collection_res.error();
+          if (collection_res.error().code() == ErrorCode::NOT_FOUND_ERROR) {
+            promise.set_error(td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "Collection was not indexed yet"));
+          } else {
+            promise.set_error(collection_res.move_as_error());
+          }
+          return;
+        }
+
+        auto collection_data = collection_res.move_as_ok();
+        auto content = get_content(data.index, ind_content, collection_data);
+        if (content.is_error()) {
+          LOG(ERROR) << "Failed to parse content for " << convert::to_raw_address(address) << ": " << content.error();
+          LOG(ERROR) << convert::to_bytes(ind_content).move_as_ok().value();
+        } else {
+          data.content = content.move_as_ok();
+        }
+
+        auto verify_r = verify_belonging_to_collection(data, collection_data);
+        if (verify_r.is_error()) {
+          LOG(ERROR) << "Failed to verify belonging to collection for " << convert::to_raw_address(address);
+          promise.set_error(verify_r.move_as_error_prefix(PSLICE() << "Failed to verify belonging to collection for " << convert::to_raw_address(address)));
+        }
+
+        add_to_cache(address, data);
+
+        promise.set_value(std::move(data));
+      }));
+    }
+  }
+
+  td::Status verify_belonging_to_collection(const NFTItemData& item_data, const NFTCollectionData& collection_data) {
+    auto code_cell = vm::std_boc_deserialize(td::base64_decode(collection_data.code_boc).move_as_ok()).move_as_ok();
+    auto data_cell = vm::std_boc_deserialize(td::base64_decode(collection_data.data_boc).move_as_ok()).move_as_ok();
+    ton::SmartContract smc({code_cell, data_cell});
+    ton::SmartContract::Args args;
+    args.set_now(td::Time::now());
+    args.set_address(block::StdAddress::parse(collection_data.address).move_as_ok());
+    args.set_stack({vm::StackEntry(item_data.index)});
+    args.set_method_id("get_nft_address_by_index");
+    auto res = smc.run_get_method(args);
+
+    if (!res.success) {
+      return td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_address_by_index failed");
+    }
+
+    auto stack = res.stack->as_span();
+    if (stack.size() != 1 || stack[0].type() != vm::StackEntry::Type::t_slice) {
+      return td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_address_by_index failed");
+    }
+    auto nft_address = convert::to_raw_address(stack[0].as_slice());
+    if (nft_address.is_error()) {
+      return td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_address_by_index parse address failed");
+    }
+
+    return nft_address.move_as_ok() == item_data.address ? td::Status::OK() : td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "NFT Item doesn't belong to the referred collection");
+  }
+
+  td::Result<std::map<std::string, std::string>> get_content(const td::RefInt256 index, td::Ref<vm::Cell> ind_content, const NFTCollectionData& collection_data) {
+    auto code_cell = vm::std_boc_deserialize(td::base64_decode(collection_data.code_boc).move_as_ok()).move_as_ok();
+    auto data_cell = vm::std_boc_deserialize(td::base64_decode(collection_data.data_boc).move_as_ok()).move_as_ok();
+    ton::SmartContract smc({code_cell, data_cell});
+    ton::SmartContract::Args args;
+    args.set_now(td::Time::now());
+    args.set_address(block::StdAddress::parse(collection_data.address).move_as_ok());
+    args.set_stack({vm::StackEntry(index), vm::StackEntry(ind_content)});
+    args.set_method_id("get_nft_content");
+    auto res = smc.run_get_method(args);
+
+    if (!res.success) {
+      return td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_content failed");
+    }
+
+    auto stack = res.stack->as_span();
+    if (stack.size() != 1 || stack[0].type() != vm::StackEntry::Type::t_cell) {
+      return td::Status::Error(ErrorCode::SMC_INTERFACE_PARSE_ERROR, "get_nft_content failed");
+    }
+
+    return parse_token_data(stack[0].as_cell());
   }
 };

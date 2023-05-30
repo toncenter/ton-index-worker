@@ -52,7 +52,7 @@ struct JettonBurn {
 
 struct NFTCollectionData {
   std::string address;
-  uint64_t next_item_index;
+  td::RefInt256 next_item_index;
   td::optional<std::string> owner_address;
   td::optional<std::map<std::string, std::string>> collection_content;
   vm::CellHash data_hash;
@@ -65,15 +65,26 @@ struct NFTCollectionData {
 struct NFTItemData {
   std::string address;
   bool init;
-  uint64_t index;
-  td::optional<std::string> collection_address;
+  td::RefInt256 index;
+  std::string collection_address;
   std::string owner_address;
-  std::string content;
+  td::optional<std::map<std::string, std::string>> content;
   uint64_t last_transaction_lt;
   vm::CellHash code_hash;
   vm::CellHash data_hash;
 };
 
+struct NFTTransfer {
+  std::string transaction_hash;
+  uint64_t query_id;
+  std::string nft_item;
+  std::string old_owner;
+  std::string new_owner;
+  std::string response_destination;
+  td::Ref<vm::Cell> custom_payload;
+  td::RefInt256 forward_amount;
+  td::Ref<vm::Cell> forward_payload;
+};
 
 struct BlockDataState {
   td::Ref<ton::validator::BlockData> block_data;
@@ -82,7 +93,8 @@ struct BlockDataState {
 
 using MasterchainBlockDataState = std::vector<BlockDataState>;
 using BlockchainEvent = std::variant<JettonTransfer, 
-                                     JettonBurn>;
+                                     JettonBurn,
+                                     NFTTransfer>;
 
 struct ParsedBlock {
   MasterchainBlockDataState mc_block_;

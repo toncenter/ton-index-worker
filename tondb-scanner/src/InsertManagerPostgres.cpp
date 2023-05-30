@@ -9,6 +9,16 @@
 #define TO_SQL_OPTIONAL(x) ((x) ? std::to_string(x.value()) : "NULL")
 #define TO_SQL_OPTIONAL_STRING(x) ((x) ? ("'" + x.value() + "'") : "NULL")
 
+std::string content_to_json_string(const std::map<std::string, std::string> &content) {
+  td::JsonBuilder jetton_content_json;
+  auto obj = jetton_content_json.enter_object();
+  for (auto &attr : content) {
+    obj(attr.first, attr.second);
+  }
+  obj.leave();
+
+  return jetton_content_json.string_builder().as_cslice().str();
+}
 
 class InsertBatchMcSeqnos: public td::actor::Actor {
 private:
@@ -332,6 +342,45 @@ public:
     transaction.exec0(query.str());
   }
 
+  void insert_nft_transfers(pqxx::work &transaction) {
+    std::ostringstream query;
+    query << "INSERT INTO nft_transfers (transaction_hash, query_id, nft_item, old_owner, new_owner, response_destination, custom_payload, forward_amount, forward_payload) VALUES ";
+    bool is_first = true;
+    for (const auto& mc_block : mc_blocks_) {
+      for (const auto& transfer : mc_block->get_events<NFTTransfer>()) {
+        if (is_first) {
+          is_first = false;
+        } else {
+          query << ", ";
+        }
+        auto custom_payload_boc_r = convert::to_bytes(transfer.custom_payload);
+        auto custom_payload_boc = custom_payload_boc_r.is_ok() ? custom_payload_boc_r.move_as_ok() : td::optional<std::string>{};
+
+        auto forward_payload_boc_r = convert::to_bytes(transfer.forward_payload);
+        auto forward_payload_boc = forward_payload_boc_r.is_ok() ? forward_payload_boc_r.move_as_ok() : td::optional<std::string>{};
+
+        query << "("
+              << "'" << transfer.transaction_hash << "',"
+              << transfer.query_id << ","
+              << "'" << transfer.nft_item << "',"
+              << "'" << transfer.old_owner << "',"
+              << "'" << transfer.new_owner << "',"
+              << "'" << transfer.response_destination << "',"
+              << TO_SQL_OPTIONAL_STRING(custom_payload_boc) << ","
+              << (transfer.forward_amount.not_null() ? transfer.forward_amount->to_dec_string() : "NULL") << ","
+              << TO_SQL_OPTIONAL_STRING(forward_payload_boc)
+              << ")";
+      }
+    }
+    if (is_first) {
+      return;
+    }
+    query << " ON CONFLICT DO NOTHING";
+
+    // LOG(DEBUG) << "Running SQL query: " << query.str();
+    transaction.exec0(query.str());
+  }
+
 
   void start_up() {
     try {
@@ -349,6 +398,7 @@ public:
       insert_account_states(txn);
       insert_jetton_transfers(txn);
       insert_jetton_burns(txn);
+      insert_nft_transfers(txn);
       txn.commit();
       promise_.set_value(td::Unit());
     } catch (const std::exception &e) {
@@ -678,7 +728,7 @@ public:
 
       txn.exec_params(query,
                       collection_.address,
-                      collection_.next_item_index,
+                      collection_.next_item_index->to_dec_string(),
                       collection_.owner_address ? collection_.owner_address.value().c_str() : nullptr,
                       collection_content ? collection_content.value().c_str() : nullptr,
                       td::base64_encode(collection_.data_hash.as_slice()),
@@ -741,7 +791,7 @@ public:
 
       NFTCollectionData collection_data;
       collection_data.address = row[0].as<std::string>();
-      collection_data.next_item_index = row[1].as<uint64_t>();
+      collection_data.next_item_index = td::dec_string_to_int256(row[1].as<std::string>());
       if (!row[2].is_null()) {
         collection_data.owner_address = row[2].as<std::string>();
       }
@@ -796,10 +846,10 @@ public:
       txn.exec_params(query,
                       item_data_.address,
                       item_data_.init,
-                      item_data_.index,
-                      item_data_.collection_address ? item_data_.collection_address.value().c_str() : nullptr,
+                      item_data_.index->to_dec_string(),
+                      item_data_.collection_address,
                       item_data_.owner_address,
-                      item_data_.content,
+                      item_data_.content ? content_to_json_string(item_data_.content.value()).c_str() : nullptr,
                       item_data_.last_transaction_lt,
                       td::base64_encode(item_data_.code_hash.as_slice().str()),
                       td::base64_encode(item_data_.data_hash.as_slice().str()));
@@ -857,12 +907,12 @@ public:
       const pqxx::row &row = result[0];
       item_data.address = row[0].as<std::string>();
       item_data.init = row[1].as<bool>();
-      item_data.index = row[2].as<uint64_t>();
+      item_data.index = td::dec_string_to_int256(row[2].as<std::string>());
       if (!row[3].is_null()) {
         item_data.collection_address = row[3].as<std::string>();
       }
       item_data.owner_address = row[4].as<std::string>();
-      item_data.content = row[5].as<std::string>();
+      // item_data.content = row[5].as<std::string>(); TODO: parse JSON string to std::map<std::string, std::string>
       item_data.last_transaction_lt = row[6].as<uint64_t>();
       item_data.code_hash = vm::CellHash::from_slice(td::base64_decode(row[7].as<std::string>()).move_as_ok());
       item_data.data_hash = vm::CellHash::from_slice(td::base64_decode(row[8].as<std::string>()).move_as_ok());
