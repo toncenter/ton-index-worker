@@ -28,8 +28,8 @@ target_link_libraries(tondb-scanner overlay tdutils tdactor adnl tl_api dht
         pqxx pq)
 
 set(TLB_TOKENS
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/tlb/tokens.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/tlb/tokens.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/tokens.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/tokens.h
 )
 
 add_custom_command(
