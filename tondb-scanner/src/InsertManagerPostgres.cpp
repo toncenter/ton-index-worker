@@ -106,6 +106,7 @@ public:
         case schema::AccStatusChange::acst_frozen: return "frozen";
         case schema::AccStatusChange::acst_deleted: return "deleted";
     };
+    return "unknown";
     UNREACHABLE();
   }
 
