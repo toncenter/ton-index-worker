@@ -106,6 +106,7 @@ public:
         case schema::AccStatusChange::acst_frozen: return "frozen";
         case schema::AccStatusChange::acst_deleted: return "deleted";
     };
+    LOG(ERROR) << "Failed parsing acc_status_change: " << acc_status_change; 
     return "unknown";
     UNREACHABLE();
   }
