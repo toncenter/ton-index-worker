@@ -24,8 +24,7 @@ RUN apt update -y \
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY --from=builder /app/build/tondb-scanner/tondb-scanner /usr/bin/tondb-scanner
-# COPY --from=builder /app/build/external/libpqxx/src/*.so /usr/lib/
 
-# ENTRYPOINT [ "/entrypoint.sh" ]
+ENTRYPOINT [ "/entrypoint.sh" ]
 # ENTRYPOINT [ "tondb-scanner" ]
-ENTRYPOINT [ "/bin/bash" ]
+# ENTRYPOINT [ "/bin/bash" ]
