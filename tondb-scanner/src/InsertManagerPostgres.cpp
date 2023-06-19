@@ -1,5 +1,6 @@
 #include <pqxx/pqxx>
 #include <chrono>
+#include <mutex>
 #include "td/utils/JsonBuilder.h"
 #include "InsertManagerPostgres.h"
 #include "convert-utils.h"
@@ -19,6 +20,11 @@ std::string content_to_json_string(const std::map<std::string, std::string> &con
 
   return jetton_content_json.string_builder().as_cslice().str();
 }
+
+// This set is used as a synchronization mechanism to prevent multiple queries for the same message
+// Otherwise Posgres will throw an error deadlock_detected
+std::set<td::Bits256> messages_in_progress;
+std::mutex messages_in_progress_mutex;
 
 class InsertBatchMcSeqnos: public td::actor::Actor {
 private:
@@ -371,38 +377,14 @@ public:
     // LOG(DEBUG) << "Running SQL query: " << query.str();
     transaction.exec0(query.str());
   }
-  
-  void insert_messsages(pqxx::work &transaction) {
-    std::vector<schema::Message> messages;
-    struct TxMsg {
-      std::string tx_hash;
-      std::string msg_hash;
-      std::string direction; // in or out
-    };
-    std::vector<TxMsg> tx_msgs;
-    std::set<td::Bits256> message_hashes;
-    for (const auto& mc_block : mc_blocks_) {
-      for (const auto& blk : mc_block->blocks_) {
-        for (const auto& transaction : blk.transactions) {
-          if (transaction.in_msg.has_value()) {
-            auto &msg = transaction.in_msg.value();
-            if (message_hashes.find(msg.hash) == message_hashes.end()) {
-              messages.push_back(msg);
-              message_hashes.insert(msg.hash);
-            }
-            tx_msgs.push_back({td::base64_encode(transaction.hash.as_slice()), td::base64_encode(transaction.in_msg.value().hash.as_slice()), "in"});
-          }
-          for (const auto& message : transaction.out_msgs) {
-            if (message_hashes.find(message.hash) == message_hashes.end()) {
-              messages.push_back(message);
-              message_hashes.insert(message.hash);
-            }
-            tx_msgs.push_back({td::base64_encode(transaction.hash.as_slice()), td::base64_encode(message.hash.as_slice()), "out"});
-          }
-        }
-      }
-    }
 
+
+  struct TxMsg {
+    std::string tx_hash;
+    std::string msg_hash;
+    std::string direction; // in or out
+  };
+  void insert_messsages(pqxx::work &transaction, std::vector<schema::Message> &messages, std::vector<TxMsg> &tx_msgs) {
     std::ostringstream query;
     query << "INSERT INTO messages (hash, source, destination, value, fwd_fee, ihr_fee, created_lt, created_at, opcode, "
                                  "ihr_disabled, bounce, bounced, import_fee, body_hash, init_state_hash) VALUES ";
@@ -431,13 +413,12 @@ public:
             << (message.init_state.not_null() ? TO_SQL_STRING(td::base64_encode(message.init_state->get_hash().as_slice())) : "NULL")
             << ")";
     }
-    if (is_first) {
-      return;
-    }
-    query << " ON CONFLICT DO NOTHING";
+    if (!is_first) {
+      query << " ON CONFLICT DO NOTHING";
 
-    // LOG(DEBUG) << "Running SQL query: " << query.str();
-    transaction.exec0(query.str());
+      // LOG(DEBUG) << "Running SQL query: " << query.str();
+      transaction.exec0(query.str());
+    }
 
     query.str("");
     is_first = true;
@@ -460,13 +441,12 @@ public:
               << ")";
       }
     }
-    if (is_first) {
-      return;
-    }
-    query << " ON CONFLICT DO NOTHING";
+    if (!is_first) {
+      query << " ON CONFLICT DO NOTHING";
 
-    // LOG(DEBUG) << "Running SQL query: " << query.str();
-    transaction.exec0(query.str());
+      // LOG(DEBUG) << "Running SQL query: " << query.str();
+      transaction.exec0(query.str());
+    }
 
     query.str("");
     query << "INSERT INTO transaction_messages (transaction_hash, message_hash, direction) VALUES ";
@@ -483,15 +463,14 @@ public:
             << TO_SQL_STRING(tx_msg.direction)
             << ")";
     }
-    if (is_first) {
-      return;
+    if (!is_first) { 
+      query << " ON CONFLICT DO NOTHING";
+
+      // LOG(DEBUG) << "Running SQL query: " << query.str();
+      transaction.exec0(query.str());
     }
-    query << " ON CONFLICT DO NOTHING";
-
-    // LOG(DEBUG) << "Running SQL query: " << query.str();
-    transaction.exec0(query.str());
   }
-
+  
   void insert_account_states(pqxx::work &transaction) {
     std::ostringstream query;
     query << "INSERT INTO account_states (hash, account, balance, account_status, frozen_hash, code_hash, data_hash) VALUES ";
@@ -634,6 +613,32 @@ public:
 
 
   void start_up() {
+    std::vector<schema::Message> messages;
+    std::vector<TxMsg> tx_msgs;
+    {
+      std::lock_guard<std::mutex> guard(messages_in_progress_mutex);
+      for (const auto& mc_block : mc_blocks_) {
+        for (const auto& blk : mc_block->blocks_) {
+          for (const auto& transaction : blk.transactions) {
+            if (transaction.in_msg.has_value()) {
+              auto &msg = transaction.in_msg.value();
+              if (messages_in_progress.find(msg.hash) == messages_in_progress.end()) {
+                messages.push_back(msg);
+                messages_in_progress.insert(msg.hash);
+              }
+              tx_msgs.push_back({td::base64_encode(transaction.hash.as_slice()), td::base64_encode(transaction.in_msg.value().hash.as_slice()), "in"});
+            }
+            for (const auto& message : transaction.out_msgs) {
+              if (messages_in_progress.find(message.hash) == messages_in_progress.end()) {
+                messages.push_back(message);
+                messages_in_progress.insert(message.hash);
+              }
+              tx_msgs.push_back({td::base64_encode(transaction.hash.as_slice()), td::base64_encode(message.hash.as_slice()), "out"});
+            }
+          }
+        }
+      }
+    }
     try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) {
@@ -642,32 +647,24 @@ public:
         return;
       }
 
-      bool success = false;
-      const int MAX_RETRY_COUNT = 3;
-      int retry_count = 0;
-      while (!success && retry_count < MAX_RETRY_COUNT) {
-        try {
-          pqxx::work txn(c);
-          insert_blocks(txn);
-          insert_transactions(txn);
-          insert_messsages(txn);
-          insert_account_states(txn);
-          insert_jetton_transfers(txn);
-          insert_jetton_burns(txn);
-          insert_nft_transfers(txn);
-          txn.commit();
-          promise_.set_value(td::Unit());
-          success = true;
-        } catch (const pqxx::deadlock_detected &e) {
-          retry_count++;
-        }
-      }
-
-      if (!success) {
-        promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Max retry count exceeded while trying to resolve deadlock"));
-      }
+      pqxx::work txn(c);
+      insert_blocks(txn);
+      insert_transactions(txn);
+      insert_messsages(txn, messages, tx_msgs);
+      insert_account_states(txn);
+      insert_jetton_transfers(txn);
+      insert_jetton_burns(txn);
+      insert_nft_transfers(txn);
+      txn.commit();
+      promise_.set_value(td::Unit());
     } catch (const std::exception &e) {
       promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error inserting to PG: " << e.what()));
+    }
+    {
+      std::lock_guard<std::mutex> guard(messages_in_progress_mutex);
+      for (const auto& msg : messages) {
+        messages_in_progress.erase(msg.hash);
+      }
     }
     stop();
   }
