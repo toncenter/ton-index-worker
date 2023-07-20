@@ -20,9 +20,18 @@ std::string content_to_json_string(const std::map<std::string, std::string> &con
   return jetton_content_json.string_builder().as_cslice().str();
 }
 
+struct BitArrayHasher {
+  std::size_t operator()(const td::Bits256& k) const {
+    std::size_t seed = 0;
+    for(const auto& el : k.as_array()) {
+        seed ^= std::hash<td::uint8>{}(el) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};
 // This set is used as a synchronization mechanism to prevent multiple queries for the same message
 // Otherwise Posgres will throw an error deadlock_detected
-std::set<td::Bits256> messages_in_progress;
+std::unordered_set<td::Bits256, BitArrayHasher> messages_in_progress;
 std::mutex messages_in_progress_mutex;
 
 void InsertBatchMcSeqnos::start_up() {
