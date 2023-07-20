@@ -1240,9 +1240,7 @@ public:
 
 InsertManagerPostgres::InsertManagerPostgres(): 
     inserted_count_(0),
-    start_time_(std::chrono::high_resolution_clock::now())//,
-    // insert_batch_seqnos_actor_(td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos"))
-    // insert_batch_seqnos_actor_(td::actor::create_actor<InsertBatchMcSeqnos>(td::actor::ActorOptions().with_name("insert_batch_mc_seqnos").with_poll()))
+    start_time_(std::chrono::high_resolution_clock::now())
 {
 }
 
@@ -1301,7 +1299,6 @@ void InsertManagerPostgres::alarm() {
         p.set_result(td::Unit());
       }
     });
-    // LOG(INFO) << "Insert actor mailbox size: " << insert_batch_seqnos_actor_.get().actor_info().mailbox().reader().calc_size() << " " << schema_blocks.size();
     td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos", credential.getConnectionString(), std::move(schema_blocks), std::move(P)).release();
   }
 
