@@ -1293,7 +1293,7 @@ void InsertManagerPostgres::alarm() {
         p.set_result(td::Unit());
       }
     });
-    LOG(INFO) << "Insert actor mailbox size: " << insert_batch_seqnos_actor_.get().actor_info().mailbox().reader().calc_size() << " " << schema_blocks.size();
+    // LOG(INFO) << "Insert actor mailbox size: " << insert_batch_seqnos_actor_.get().actor_info().mailbox().reader().calc_size() << " " << schema_blocks.size();
     td::actor::send_closure(insert_batch_seqnos_actor_, &InsertBatchMcSeqnos::insert, credential.getConnectionString(), std::move(schema_blocks), std::move(P));
   }
 
