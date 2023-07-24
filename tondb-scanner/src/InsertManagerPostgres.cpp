@@ -683,8 +683,6 @@ void InsertBatchMcSeqnos::insert_nft_transfers(pqxx::work &transaction, std::vec
 }
 
 void InsertBatchMcSeqnos::insert(std::string connection_string, std::vector<ParsedBlockPtr> mc_blocks, td::Promise<td::Unit> promise) {
-  // promise.set_result(td::Unit());
-  // return;
   try {
     pqxx::connection c(connection_string);
     if (!c.is_open()) {
@@ -1236,8 +1234,7 @@ public:
 InsertManagerPostgres::InsertManagerPostgres(): 
     inserted_count_(0),
     start_time_(std::chrono::high_resolution_clock::now()),
-    // insert_batch_seqnos_actor_(td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos"))
-    insert_batch_seqnos_actor_(td::actor::create_actor<InsertBatchMcSeqnos>(td::actor::ActorOptions().with_name("insert_batch_mc_seqnos").with_poll()))
+    insert_batch_seqnos_actor_(td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos"))
 {
 }
 
