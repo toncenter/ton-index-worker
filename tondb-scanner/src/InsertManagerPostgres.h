@@ -10,7 +10,10 @@ private:
   std::queue<ParsedBlockPtr> insert_queue_;
   std::queue<td::Promise<td::Unit>> promise_queue_;
 
-  int batch_size{2048};
+  int batch_blocks_count_{2048};
+  int batch_tx_count_{50000};
+  int max_parallel_insert_actors_{5};
+  std::atomic<int> parallel_insert_actors_{0};
   // td::actor::ActorOwn<InsertBatchMcSeqnos> insert_batch_seqnos_actor_;
 
   struct PostgresCredential {
@@ -35,7 +38,7 @@ public:
   void set_password(std::string value) { credential.password = std::move(value); }
   void set_dbname(std::string value) { credential.dbname = std::move(value); }
 
-  void set_batch_size(int value) { batch_size = value; }
+  void set_batch_blocks_count(int value) { batch_blocks_count_ = value; }
 
   void start_up() override;
   void alarm() override;
@@ -71,6 +74,11 @@ private:
     std::string direction; // in or out
   };
 
+  struct MsgBody {
+    std::string hash;
+    std::string body;
+  };
+
   std::string stringify(schema::ComputeSkipReason compute_skip_reason);
   std::string stringify(schema::AccStatusChange acc_status_change);
   std::string stringify(schema::AccountStatus account_status);
@@ -84,8 +92,8 @@ private:
   std::string jsonify(schema::TransactionDescr descr);
   void insert_blocks(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);
   void insert_transactions(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);
-  void insert_messsages(pqxx::work &transaction, const std::vector<schema::Message> &messages, const std::vector<TxMsg> &tx_msgs);
-  void insert_messages_contents(const std::vector<schema::Message>& messages, pqxx::work& transaction);
+  void insert_messsages(pqxx::work &transaction, const std::vector<schema::Message> &messages, const std::vector<MsgBody>& msg_bodies, const std::vector<TxMsg> &tx_msgs);
+  void insert_messages_contents(const std::vector<MsgBody>& msg_bodies, pqxx::work& transaction);
   void insert_messages_impl(const std::vector<schema::Message>& messages, pqxx::work& transaction);
   void insert_messages_txs(const std::vector<TxMsg>& messages, pqxx::work& transaction);
   void insert_account_states(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);

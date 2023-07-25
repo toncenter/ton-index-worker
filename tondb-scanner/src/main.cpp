@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
     } catch (...) {
       return td::Status::Error(ton::ErrorCode::error, "bad value for --insert-batch-size: not a number");
     }
-    td::actor::send_closure(insert_manager, &InsertManagerPostgres::set_batch_size, v);
+    td::actor::send_closure(insert_manager, &InsertManagerPostgres::set_batch_blocks_count, v);
     return td::Status::OK();
   });
 

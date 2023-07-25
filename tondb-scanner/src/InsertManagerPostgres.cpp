@@ -32,11 +32,13 @@ struct BitArrayHasher {
 // This set is used as a synchronization mechanism to prevent multiple queries for the same message
 // Otherwise Posgres will throw an error deadlock_detected
 std::unordered_set<td::Bits256, BitArrayHasher> messages_in_progress;
+std::unordered_set<td::Bits256, BitArrayHasher> msg_bodies_in_progress;
 std::mutex messages_in_progress_mutex;
 
 void InsertBatchMcSeqnos::start_up() {
   std::vector<schema::Message> messages;
   std::vector<TxMsg> tx_msgs;
+  std::vector<MsgBody> msg_bodies;
   {
     std::lock_guard<std::mutex> guard(messages_in_progress_mutex);
     for (const auto& mc_block : mc_blocks_) {
@@ -48,14 +50,38 @@ void InsertBatchMcSeqnos::start_up() {
               messages.push_back(msg);
               messages_in_progress.insert(msg.hash);
             }
+            td::Bits256 body_hash = msg.body->get_hash().bits();
+            if (msg_bodies_in_progress.find(body_hash) == msg_bodies_in_progress.end()) {
+              msg_bodies.push_back({td::base64_encode(body_hash.as_slice()), msg.body_boc});
+              msg_bodies_in_progress.insert(body_hash);
+            }
+            if (msg.init_state_boc) {
+              td::Bits256 init_state_hash = msg.init_state->get_hash().bits();
+              if (msg_bodies_in_progress.find(init_state_hash) == msg_bodies_in_progress.end()) {
+                msg_bodies.push_back({td::base64_encode(init_state_hash.as_slice()), msg.init_state_boc.value()});
+                msg_bodies_in_progress.insert(init_state_hash);
+              }
+            }
             tx_msgs.push_back({td::base64_encode(transaction.hash.as_slice()), td::base64_encode(transaction.in_msg.value().hash.as_slice()), "in"});
           }
-          for (const auto& message : transaction.out_msgs) {
-            if (messages_in_progress.find(message.hash) == messages_in_progress.end()) {
-              messages.push_back(message);
-              messages_in_progress.insert(message.hash);
+          for (const auto& msg : transaction.out_msgs) {
+            if (messages_in_progress.find(msg.hash) == messages_in_progress.end()) {
+              messages.push_back(msg);
+              messages_in_progress.insert(msg.hash);
             }
-            tx_msgs.push_back({td::base64_encode(transaction.hash.as_slice()), td::base64_encode(message.hash.as_slice()), "out"});
+            td::Bits256 body_hash = msg.body->get_hash().bits();
+            if (msg_bodies_in_progress.find(body_hash) == msg_bodies_in_progress.end()) {
+              msg_bodies.push_back({td::base64_encode(body_hash.as_slice()), msg.body_boc});
+              msg_bodies_in_progress.insert(body_hash);
+            }
+            if (msg.init_state_boc) {
+              td::Bits256 init_state_hash = msg.init_state->get_hash().bits();
+              if (msg_bodies_in_progress.find(init_state_hash) == msg_bodies_in_progress.end()) {
+                msg_bodies.push_back({td::base64_encode(init_state_hash.as_slice()), msg.init_state_boc.value()});
+                msg_bodies_in_progress.insert(init_state_hash);
+              }
+            }
+            tx_msgs.push_back({td::base64_encode(transaction.hash.as_slice()), td::base64_encode(msg.hash.as_slice()), "out"});
           }
         }
       }
@@ -72,7 +98,7 @@ void InsertBatchMcSeqnos::start_up() {
     pqxx::work txn(c);
     insert_blocks(txn, mc_blocks_);
     insert_transactions(txn, mc_blocks_);
-    insert_messsages(txn, messages, tx_msgs);
+    insert_messsages(txn, messages, msg_bodies, tx_msgs);
     insert_account_states(txn, mc_blocks_);
     insert_jetton_transfers(txn, mc_blocks_);
     insert_jetton_burns(txn, mc_blocks_);
@@ -437,23 +463,22 @@ void InsertBatchMcSeqnos::insert_transactions(pqxx::work &transaction, const std
 }
 
 
-void InsertBatchMcSeqnos::insert_messsages(pqxx::work &transaction, const std::vector<schema::Message> &messages, const std::vector<TxMsg> &tx_msgs) {
+void InsertBatchMcSeqnos::insert_messsages(pqxx::work &transaction, const std::vector<schema::Message> &messages, const std::vector<MsgBody>& message_bodies, const std::vector<TxMsg> &tx_msgs) {
   messages_count_ = messages.size();
   if (!messages_count_) {
     return;
   }
   
-  insert_messages_contents(messages, transaction);
+  insert_messages_contents(message_bodies, transaction);
   insert_messages_impl(messages, transaction);
   insert_messages_txs(tx_msgs, transaction);
 }
 
 const int max_chunk_size = 1000000;
 
-void InsertBatchMcSeqnos::insert_messages_contents(const std::vector<schema::Message>& messages, pqxx::work& transaction) {
+void InsertBatchMcSeqnos::insert_messages_contents(const std::vector<MsgBody>& message_bodies, pqxx::work& transaction) {
   std::ostringstream query;
   bool is_first = true;
-  size_t chunk_size = 0;
   auto exec_query = [&]() {
     query << " ON CONFLICT DO NOTHING";
     transaction.exec0(query.str());
@@ -461,11 +486,10 @@ void InsertBatchMcSeqnos::insert_messages_contents(const std::vector<schema::Mes
     query.clear();
     query << "INSERT INTO message_contents (hash, body) VALUES ";
     is_first = true;
-    chunk_size = 0;
   };
 
   query << "INSERT INTO message_contents (hash, body) VALUES ";
-  for (const auto& message : messages) {
+  for (const auto& msg_body : message_bodies) {
     if (is_first) {
       is_first = false;
     } else {
@@ -473,18 +497,11 @@ void InsertBatchMcSeqnos::insert_messages_contents(const std::vector<schema::Mes
     }
 
     query << "("
-          << "'" << td::base64_encode(message.body->get_hash().as_slice()) << "',"
-          << TO_SQL_STRING(message.body_boc)
+          << "'" << msg_body.hash << "',"
+          << TO_SQL_STRING(msg_body.body)
           << ")";
-    if (message.init_state_boc) {
-      query << ", ("
-            << "'" << td::base64_encode(message.init_state->get_hash().as_slice()) << "',"
-            << TO_SQL_STRING(message.init_state_boc.value())
-            << ")";
-    }
-    chunk_size += query.str().length();
 
-    if (chunk_size >= max_chunk_size) {
+    if (query.str().length() >= max_chunk_size) {
       exec_query();
     }
   }
@@ -497,7 +514,6 @@ void InsertBatchMcSeqnos::insert_messages_contents(const std::vector<schema::Mes
 void InsertBatchMcSeqnos::insert_messages_impl(const std::vector<schema::Message>& messages, pqxx::work& transaction) {
   std::ostringstream query;
   bool is_first = true;
-  size_t chunk_size = 0;
   auto exec_query = [&]() {
     query << " ON CONFLICT DO NOTHING";
     transaction.exec0(query.str());
@@ -506,7 +522,6 @@ void InsertBatchMcSeqnos::insert_messages_impl(const std::vector<schema::Message
     query << "INSERT INTO messages (hash, source, destination, value, fwd_fee, ihr_fee, created_lt, created_at, opcode, "
                                   "ihr_disabled, bounce, bounced, import_fee, body_hash, init_state_hash) VALUES ";
     is_first = true;
-    chunk_size = 0;
   };
 
   query << "INSERT INTO messages (hash, source, destination, value, fwd_fee, ihr_fee, created_lt, created_at, opcode, "
@@ -535,9 +550,8 @@ void InsertBatchMcSeqnos::insert_messages_impl(const std::vector<schema::Message
           << (message.init_state.not_null() ? TO_SQL_STRING(td::base64_encode(message.init_state->get_hash().as_slice())) : "NULL")
           << ")";
 
-    chunk_size += query.str().length();
 
-    if (chunk_size >= max_chunk_size) {
+    if (query.str().length() >= max_chunk_size) {
       exec_query();
     }
   }
@@ -550,7 +564,6 @@ void InsertBatchMcSeqnos::insert_messages_impl(const std::vector<schema::Message
 void InsertBatchMcSeqnos::insert_messages_txs(const std::vector<TxMsg>& tx_msgs, pqxx::work& transaction) {
   std::ostringstream query;
   bool is_first = true;
-  size_t chunk_size = 0;
   auto exec_query = [&]() {
     query << " ON CONFLICT DO NOTHING";
     transaction.exec0(query.str());
@@ -558,7 +571,6 @@ void InsertBatchMcSeqnos::insert_messages_txs(const std::vector<TxMsg>& tx_msgs,
     query.clear();
     query << "INSERT INTO transaction_messages (transaction_hash, message_hash, direction) VALUES ";
     is_first = true;
-    chunk_size = 0;
   };
 
   query << "INSERT INTO transaction_messages (transaction_hash, message_hash, direction) VALUES ";
@@ -574,9 +586,7 @@ void InsertBatchMcSeqnos::insert_messages_txs(const std::vector<TxMsg>& tx_msgs,
           << TO_SQL_STRING(tx_msg.direction)
           << ")";
 
-    chunk_size += query.str().length();
-
-    if (chunk_size >= max_chunk_size) {
+    if (query.str().length() >= max_chunk_size) {
       exec_query();
     }
   }
@@ -1280,22 +1290,30 @@ void InsertManagerPostgres::alarm() {
 
   std::vector<td::Promise<td::Unit>> promises;
   std::vector<ParsedBlockPtr> schema_blocks;
-  while (!insert_queue_.empty() && schema_blocks.size() < batch_size) {
+  int tx_count = 0;
+  while (!insert_queue_.empty() && tx_count < batch_tx_count_ && schema_blocks.size() < batch_blocks_count_ && parallel_insert_actors_ < max_parallel_insert_actors_) {
     auto schema_block = std::move(insert_queue_.front());
     insert_queue_.pop();
 
     auto promise = std::move(promise_queue_.front());
     promise_queue_.pop();
 
+    for (const auto& bl : schema_block->blocks_) {
+      tx_count += bl.transactions.size();
+    }
+
     promises.push_back(std::move(promise));
     schema_blocks.push_back(std::move(schema_block));
     if(inserted_count_ == 0) {
       start_time_ = std::chrono::high_resolution_clock::now();
     }
-    ++inserted_count_;  // FIXME: increasing before insertion. Move this line in promise P
+    ++inserted_count_;  // FIXME: increasing before insertion    
   }
+  bool scheduled = false;
   if (!schema_blocks.empty()) {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), promises = std::move(promises)](td::Result<td::Unit> R) mutable {
+    scheduled = true;
+    auto P = td::PromiseCreator::lambda([this, promises = std::move(promises)](td::Result<td::Unit> R) mutable {
+      parallel_insert_actors_--;
       if (R.is_error()) {
         LOG(ERROR) << "Error inserting to PG: " << R.move_as_error();
         for (auto& p : promises) {
@@ -1308,11 +1326,12 @@ void InsertManagerPostgres::alarm() {
         p.set_result(td::Unit());
       }
     });
+    parallel_insert_actors_++;
     td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos", credential.getConnectionString(), std::move(schema_blocks), std::move(P)).release();
   }
 
-  if (!insert_queue_.empty()) {
-    alarm_timestamp() = td::Timestamp::in(0.001);
+  if (!insert_queue_.empty() && scheduled) {
+    alarm_timestamp() = td::Timestamp::in(0.1);
   } else {
     alarm_timestamp() = td::Timestamp::in(1.0);
   }
