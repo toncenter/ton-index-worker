@@ -10,7 +10,7 @@ function usage() {
 POSITIONAL_ARGS=()
 FORCE_BUILD=0
 
-TASK_ARGS
+TASK_ARGS=
 
 while [[ $# -gt 0 ]]; do
     case $1 in 
@@ -31,6 +31,9 @@ while [[ $# -gt 0 ]]; do
             shift; shift;;
         --db)
             TASK_ARGS="${TASK_ARGS} --db $2"
+            shift; shift;;
+        --dbname)
+            TASK_ARGS="${TASK_ARGS} --dbname $2"
             shift; shift;;
         --from)
             TASK_ARGS="${TASK_ARGS} --from $2"
@@ -54,10 +57,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 # install libraries
-apt update
-apt install -y build-essential cmake clang openssl libssl-dev zlib1g-dev \
-               gperf wget git curl libreadline-dev ccache libmicrohttpd-dev \
-               pkg-config libsecp256k1-dev libsodium-dev python3-dev libpq-dev ninja-build
+sudo apt update
+sudo apt install -y build-essential cmake clang openssl libssl-dev zlib1g-dev \
+                    gperf wget git curl libreadline-dev ccache libmicrohttpd-dev \
+                    pkg-config libsecp256k1-dev libsodium-dev python3-dev libpq-dev ninja-build
 
 # build
 if [[ $FORCE_BUILD -eq "1" ]]; then
@@ -71,12 +74,12 @@ else
     mkdir -p build
     cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=off -GNinja -S . -B ./build
     ninja -C ./build -j$(nproc) tondb-scanner
-    cp ./build/tondb-scanner/tondb-scanner /usr/local/bin
+    sudo cp ./build/tondb-scanner/tondb-scanner /usr/local/bin
 fi
 
 # setup daemon
 echo "Task args: \'$TASK_ARGS\'"
-cat <<EOF > /etc/systemd/system/ton-index-worker.service
+cat <<EOF | sudo tee /etc/systemd/system/ton-index-worker.service
 [Unit]
 Description = ton index worker service
 After = network.target
@@ -98,6 +101,6 @@ WantedBy = multi-user.target
 EOF
 
 # enable service
-systemctl daemon-reload
-systemctl enable ton-index-worker.service
-systemctl start ton-index-worker.service
+sudo systemctl daemon-reload
+sudo systemctl enable ton-index-worker.service
+sudo systemctl start ton-index-worker.service
