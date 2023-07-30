@@ -10,11 +10,10 @@ private:
   std::queue<ParsedBlockPtr> insert_queue_;
   std::queue<td::Promise<td::Unit>> promise_queue_;
 
-  int batch_blocks_count_{2048};
+  int batch_blocks_count_{512};
   int batch_tx_count_{50000};
-  int max_parallel_insert_actors_{5};
+  int max_parallel_insert_actors_{3};
   std::atomic<int> parallel_insert_actors_{0};
-  // td::actor::ActorOwn<InsertBatchMcSeqnos> insert_batch_seqnos_actor_;
 
   struct PostgresCredential {
     std::string host = "127.0.0.1";
@@ -26,7 +25,7 @@ private:
     std::string getConnectionString();
   } credential;
 
-  unsigned long inserted_count_;
+  std::atomic<uint> inserted_count_;
   std::chrono::system_clock::time_point start_time_;
   std::chrono::system_clock::time_point last_verbose_time_;
 public:
@@ -39,6 +38,7 @@ public:
   void set_dbname(std::string value) { credential.dbname = std::move(value); }
 
   void set_batch_blocks_count(int value) { batch_blocks_count_ = value; }
+  void set_parallel_inserts_actors(int value) { parallel_insert_actors_ = value; }
 
   void start_up() override;
   void alarm() override;

@@ -105,6 +105,12 @@ void InsertBatchMcSeqnos::start_up() {
     insert_nft_transfers(txn, mc_blocks_);
     txn.commit();
 
+    LOG(WARNING) << "Inserted " 
+          << mc_blocks_.size() << " mc blocks, "
+          << blocks_count_ << " blocks, " 
+          << transactions_count_ << " txs, " 
+          << messages_count_ << " msgs";
+
     promise_.set_value(td::Unit());
   } catch (const std::exception &e) {
     promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error inserting to PG: " << e.what()));
@@ -1307,7 +1313,6 @@ void InsertManagerPostgres::alarm() {
     if(inserted_count_ == 0) {
       start_time_ = std::chrono::high_resolution_clock::now();
     }
-    ++inserted_count_;  // FIXME: increasing before insertion    
   }
   bool scheduled = false;
   if (!schema_blocks.empty()) {
@@ -1325,6 +1330,8 @@ void InsertManagerPostgres::alarm() {
       for (auto& p : promises) {
         p.set_result(td::Unit());
       }
+      
+      inserted_count_ += promises.size();
     });
     parallel_insert_actors_++;
     td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos", credential.getConnectionString(), std::move(schema_blocks), std::move(P)).release();
