@@ -457,7 +457,8 @@ void InsertBatchMcSeqnos::insert_transactions(pqxx::work &transaction, const std
               << transaction.total_fees << ","
               << TO_SQL_STRING(td::base64_encode(transaction.account_state_hash_before.as_slice())) << ","
               << TO_SQL_STRING(td::base64_encode(transaction.account_state_hash_after.as_slice())) << ","
-              << "'" << jsonify(transaction.description) << "'"
+              // << "'" << jsonify(transaction.description) << "'"  // FIXME: remove for production
+              << "''"
               << ")";
         ++transactions_count_;
       }

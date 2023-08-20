@@ -11,8 +11,8 @@ private:
   std::queue<td::Promise<td::Unit>> promise_queue_;
 
   int batch_blocks_count_{512};
-  int batch_tx_count_{8192};
-  int batch_msg_count_{16384};
+  int batch_tx_count_{32768};
+  int batch_msg_count_{65536};
   int max_parallel_insert_actors_{3};
   std::atomic<int> parallel_insert_actors_{0};
 

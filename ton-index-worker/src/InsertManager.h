@@ -1,0 +1,41 @@
+#pragma once
+#include "td/actor/actor.h"
+#include "IndexData.h"
+
+enum ErrorCode {
+  DB_ERROR = 500,
+  CACHED_CODE_HASH_NO_ENTITY = 501,
+  DATA_PARSING_ERROR = 502,
+  GET_METHOD_WRONG_RESULT = 503,
+  ADDITIONAL_CHECKS_FAILED = 504,
+  EVENT_PARSING_ERROR = 505,
+
+  CODE_HASH_NOT_FOUND = 600,
+  ENTITY_NOT_FOUND = 601
+};
+
+class InsertManagerInterface: public td::actor::Actor {
+public:
+  virtual void insert(ParsedBlockPtr block_ds, td::Promise<td::Unit> promise) = 0;
+
+  virtual void get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) = 0;
+
+  virtual void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) = 0;
+  virtual void get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) = 0;
+
+  virtual void upsert_jetton_master(JettonMasterData jetton_master, td::Promise<td::Unit> promise) = 0;
+  virtual void get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) = 0;
+
+  virtual void upsert_nft_collection(NFTCollectionData nft_collection, td::Promise<td::Unit> promise) = 0;
+  virtual void get_nft_collection(std::string address, td::Promise<NFTCollectionData> promise) = 0;
+
+  virtual void upsert_nft_item(NFTItemData nft_item, td::Promise<td::Unit> promise) = 0;
+  virtual void get_nft_item(std::string address, td::Promise<NFTItemData> promise) = 0;
+
+  // helper template functions
+  template <class T>
+  void upsert_entity(T entity, td::Promise<td::Unit> promise);
+
+  template <class T>
+  void get_entity(std::string address, td::Promise<T> promise);
+};
