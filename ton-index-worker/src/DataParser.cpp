@@ -593,7 +593,7 @@ td::Status ParseQuery::parse_account_states(const td::Ref<ShardState>& block_sta
     case block::gen::Account::account_none:
       continue;
     case block::gen::Account::account: {
-      TRY_RESULT(account, parse_account(std::move(account_root), sstate.gen_utime));
+      TRY_RESULT(account, parse_account(std::move(account_root)));
       result->account_states_.push_back(account);
       break;
     }
@@ -605,7 +605,7 @@ td::Status ParseQuery::parse_account_states(const td::Ref<ShardState>& block_sta
   return td::Status::OK();
 }
 
-td::Result<schema::AccountState> ParseQuery::parse_account(td::Ref<vm::Cell> account_root, uint32_t gen_utime) {
+td::Result<schema::AccountState> ParseQuery::parse_account(td::Ref<vm::Cell> account_root) {
   block::gen::Account::Record_account account;
   if (!tlb::unpack_cell(account_root, account)) {
     return td::Status::Error("Failed to unpack Account");
@@ -620,7 +620,6 @@ td::Result<schema::AccountState> ParseQuery::parse_account(td::Ref<vm::Cell> acc
   TRY_RESULT(account_addr, convert::to_raw_address(account.addr));
   TRY_RESULT_ASSIGN(schema_account.account, block::StdAddress::parse(account_addr));
   TRY_RESULT_ASSIGN(schema_account.balance, convert::to_balance(storage.balance));
-  schema_account.timestamp = gen_utime;
   schema_account.last_trans_lt = storage.last_trans_lt;
   
   schema_account.tenant_id = ton::shard_prefix(schema_account.account.addr, 60) % CITUS_SHARDS;

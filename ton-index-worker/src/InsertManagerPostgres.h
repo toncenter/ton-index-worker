@@ -11,8 +11,8 @@ private:
   std::queue<td::Promise<td::Unit>> promise_queue_;
 
   int batch_blocks_count_{512};
-  int batch_tx_count_{8192};
-  int batch_msg_count_{16384};
+  int batch_tx_count_{32768};
+  int batch_msg_count_{65536};
   int max_parallel_insert_actors_{3};
   std::atomic<int> parallel_insert_actors_{0};
 
@@ -100,7 +100,6 @@ private:
   void insert_messages_impl(const std::vector<schema::Message>& messages, pqxx::work& transaction);
   void insert_messages_txs(const std::vector<TxMsg>& messages, pqxx::work& transaction);
   void insert_account_states(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);
-  void insert_latest_account_states(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);
   void insert_jetton_transfers(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);
   void insert_jetton_burns(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);
   void insert_nft_transfers(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks);
