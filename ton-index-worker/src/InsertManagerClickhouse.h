@@ -54,10 +54,10 @@ private:
     td::int32 max_parallel_insert_actors_{32};
     td::int32 parallel_insert_actors_{0};
 
-    td::int32 max_insert_mc_blocks_{128};
-    td::int32 max_insert_blocks_{1024};
-    td::int32 max_insert_txs_{8192};
-    td::int32 max_insert_msgs_{32768};
+    td::int32 max_insert_mc_blocks_{1024};
+    td::int32 max_insert_blocks_{2048};
+    td::int32 max_insert_txs_{32768};
+    td::int32 max_insert_msgs_{65536};
 
     
     clickhouse::ClientOptions get_clickhouse_options();
