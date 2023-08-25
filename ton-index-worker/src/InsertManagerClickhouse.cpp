@@ -11,7 +11,7 @@ void InsertManagerClickhouse::start_up() {
 
         td::StringBuilder builder;
         // TODO: create full tables
-        builder << "CREATE TABLE IF NOT EXISTS default.blocks ("
+        builder << "CREATE TABLE IF NOT EXISTS blocks ("
                 << "workchain Int32, "
                 << "shard Int64, "
                 << "seqno Int32, "
@@ -46,7 +46,7 @@ void InsertManagerClickhouse::get_existing_seqnos(td::Promise<std::vector<std::u
         clickhouse::Client client(options);
         
         std::vector<std::uint32_t> result;
-        client.Select("SELECT seqno from default.blocks WHERE workchain = -1", [&result](const clickhouse::Block& block) {
+        client.Select("SELECT seqno from blocks WHERE workchain = -1", [&result](const clickhouse::Block& block) {
             for (size_t i = 0; i < block.GetRowCount(); ++i) {
                 result.push_back(block[0]->As<clickhouse::ColumnInt32>()->At(i));
             }
@@ -98,7 +98,7 @@ void InsertManagerClickhouse::schedule_next_insert_batches()
         });
         
         ++parallel_insert_actors_;
-        td::actor::create_actor<InsertBatchClickhouse>(PSLICE() << "insert_batch_clickhouse__" << parallel_insert_actors_, std::move(get_clickhouse_options()), std::move(batch), std::move(P)).release();
+        td::actor::create_actor<InsertBatchClickhouse>(PSLICE() << "insert_batch_clickhouse", std::move(get_clickhouse_options()), std::move(batch), std::move(P)).release();
     }
 }
 
@@ -217,7 +217,7 @@ void InsertBatchClickhouse::insert_blocks(clickhouse::Client &client){
     block.AppendColumn("end_lt", end_lt);
     block.AppendColumn("transaction_count", transaction_count);
 
-    client.Insert("default.blocks", block);
+    client.Insert("blocks", block);
 
     for(auto& task_ : insert_tasks_) {
         task_.promise_.set_result(td::Unit());

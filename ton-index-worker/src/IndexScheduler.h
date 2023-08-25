@@ -27,10 +27,11 @@ private:
   std::double_t avg_tps_{0};
   std::int64_t last_existing_seqno_count_{0};
 
-  std::uint32_t max_queue_mc_blocks_{1024};
-  std::uint32_t max_queue_blocks_{8192};
-  std::uint32_t max_queue_txs_{262144};
+  std::uint32_t max_queue_mc_blocks_{16384};
+  std::uint32_t max_queue_blocks_{16384};
+  std::uint32_t max_queue_txs_{524288};
   std::uint32_t max_queue_msgs_{524288};
+  QueueStatus cur_queue_status_;
 public:
   IndexScheduler(td::actor::ActorId<DbScanner> db_scanner, td::actor::ActorId<InsertManagerInterface> insert_manager,
     td::actor::ActorId<ParseManager> parse_manager, std::int32_t last_known_seqno = 0)

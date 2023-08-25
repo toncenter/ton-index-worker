@@ -11,7 +11,15 @@ void IndexScheduler::alarm() {
     std::double_t alpha = 0.7;
     avg_tps_ = alpha * avg_tps_ + (1 - alpha) * (existing_seqnos_.size() - last_existing_seqno_count_);
     last_existing_seqno_count_ = existing_seqnos_.size();
-    LOG(INFO) << "Done " << existing_seqnos_.size() << " seqnos. Indexed: " << last_indexed_seqno_ << " / " << last_known_seqno_ << " Block/sec: " << avg_tps_;
+    double eta = (last_known_seqno_ - last_indexed_seqno_) / avg_tps_ / 60;
+
+    LOG(INFO) << "Indexed: " << last_indexed_seqno_ << " / " << last_known_seqno_ 
+              << "\tBlock/sec: " << avg_tps_
+              << "\tETA: " << eta << " min"
+              << "\tQ[" << cur_queue_status_.mc_blocks_ << "M, " 
+              << cur_queue_status_.blocks_ << "b, " 
+              << cur_queue_status_.txs_ << "t, " 
+              << cur_queue_status_.msgs_ << "m]";
 
     auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueStatus> R){
         R.ensure();
@@ -129,12 +137,12 @@ void IndexScheduler::seqno_queued_to_insert(std::uint32_t mc_seqno, QueueStatus 
 }
 
 void IndexScheduler::got_insert_queue_status(QueueStatus status) {
+    cur_queue_status_ = status;
     bool accept_blocks = (status.mc_blocks_ < max_queue_mc_blocks_) && (status.blocks_ < max_queue_blocks_) && \
         (status.txs_ < max_queue_txs_) && (status.msgs_ < max_queue_msgs_);
     if (accept_blocks) {
         td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
     }
-    // LOG(INFO) << "Queue: " << status.mc_blocks_ << " " << status.blocks_ << " " << status.txs_ << " " << status.msgs_ << " accept: " << accept_blocks;
 }
 
 void IndexScheduler::seqno_inserted(std::uint32_t mc_seqno, td::Unit result) {
