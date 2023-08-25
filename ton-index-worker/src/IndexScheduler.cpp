@@ -152,15 +152,9 @@ void IndexScheduler::seqno_inserted(std::uint32_t mc_seqno, td::Unit result) {
     }
 }
 
-void IndexScheduler::schedule_next_seqnos()
-{
+void IndexScheduler::schedule_next_seqnos() {
     LOG(DEBUG) << "Scheduling next seqnos. Current tasks: " << processing_seqnos_.size();
-
-    if (queued_seqnos_.size() == 0) {
-        return;
-    }
-
-    while (processing_seqnos_.size() < max_active_tasks_) {
+    while (!queued_seqnos_.empty() && (processing_seqnos_.size() < max_active_tasks_)) {
         std::uint32_t seqno = queued_seqnos_.front();
         queued_seqnos_.pop();
         schedule_seqno(seqno);
