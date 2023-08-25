@@ -14,9 +14,23 @@ enum ErrorCode {
   ENTITY_NOT_FOUND = 601
 };
 
+struct QueueStatus {
+  unsigned long mc_blocks_;
+  unsigned long blocks_;
+  unsigned long txs_;
+  unsigned long msgs_;
+
+  friend QueueStatus operator+(QueueStatus l, const QueueStatus& r);
+  friend QueueStatus operator-(QueueStatus l, const QueueStatus& r);
+  QueueStatus& operator+=(const QueueStatus& r);
+  QueueStatus& operator-=(const QueueStatus& r);
+};
+
+
 class InsertManagerInterface: public td::actor::Actor {
 public:
-  virtual void insert(ParsedBlockPtr block_ds, td::Promise<td::Unit> promise) = 0;
+  virtual void insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueStatus> queued_promise, td::Promise<td::Unit> inserted_promise) = 0;
+  virtual void get_insert_queue_status(td::Promise<QueueStatus> promise) = 0;
 
   virtual void get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) = 0;
 

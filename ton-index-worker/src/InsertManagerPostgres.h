@@ -6,17 +6,8 @@
 class InsertBatchMcSeqnos;
 
 class InsertManagerPostgres: public InsertManagerInterface {
-private:
-  std::queue<ParsedBlockPtr> insert_queue_;
-  std::queue<td::Promise<td::Unit>> promise_queue_;
-
-  int batch_blocks_count_{512};
-  int batch_tx_count_{32768};
-  int batch_msg_count_{65536};
-  int max_parallel_insert_actors_{3};
-  std::atomic<int> parallel_insert_actors_{0};
-
-  struct PostgresCredential {
+public:
+  struct Credential {
     std::string host = "127.0.0.1";
     int port = 5432;
     std::string user;
@@ -24,19 +15,24 @@ private:
     std::string dbname = "ton_index";
 
     std::string getConnectionString();
-  } credential;
+  };
+private:
+  std::queue<ParsedBlockPtr> insert_queue_;
+  std::queue<td::Promise<td::Unit>> promise_queue_;
+
+  td::int32 batch_blocks_count_{512};
+  td::int32 batch_tx_count_{32768};
+  td::int32 batch_msg_count_{65536};
+  td::int32 max_parallel_insert_actors_{3};
+  std::atomic<int> parallel_insert_actors_{0};
+
+  Credential credential_;
 
   std::atomic<uint> inserted_count_;
   std::chrono::system_clock::time_point start_time_;
   std::chrono::system_clock::time_point last_verbose_time_;
 public:
-  InsertManagerPostgres();
-
-  void set_host(std::string value) { credential.host = std::move(value); }
-  void set_port(int value) { credential.port = value; }
-  void set_user(std::string value) { credential.user = std::move(value); }
-  void set_password(std::string value) { credential.password = std::move(value); }
-  void set_dbname(std::string value) { credential.dbname = std::move(value); }
+  InsertManagerPostgres(Credential credential);
 
   void set_batch_blocks_count(int value) { batch_blocks_count_ = value; }
   void set_parallel_inserts_actors(int value) { max_parallel_insert_actors_ = value; }
@@ -47,7 +43,7 @@ public:
   void report_statistics();
 
   void get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) override;
-  void insert(ParsedBlockPtr block_ds, td::Promise<td::Unit> promise) override;
+  void insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueStatus> queued_promise, td::Promise<td::Unit> inserted_promise) override;
   void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) override;
   void get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) override;
   void upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) override;

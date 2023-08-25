@@ -9,7 +9,6 @@ add_executable(tondb-scanner
     src/parse_token_data.cpp
     src/EventProcessor.cpp
     src/convert-utils.cpp
-    src/IndexScheduler.cpp
     src/tokens.cpp
 )
 
