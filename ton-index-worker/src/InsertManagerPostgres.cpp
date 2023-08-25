@@ -457,8 +457,7 @@ void InsertBatchMcSeqnos::insert_transactions(pqxx::work &transaction, const std
               << transaction.total_fees << ","
               << TO_SQL_STRING(td::base64_encode(transaction.account_state_hash_before.as_slice())) << ","
               << TO_SQL_STRING(td::base64_encode(transaction.account_state_hash_after.as_slice())) << ","
-              // << "'" << jsonify(transaction.description) << "'"  // FIXME: remove for production
-              << "''"
+              << "'" << jsonify(transaction.description) << "'"  // FIXME: remove for production
               << ")";
         ++transactions_count_;
       }
@@ -1243,7 +1242,8 @@ public:
   }
 };
 
-InsertManagerPostgres::InsertManagerPostgres(): 
+InsertManagerPostgres::InsertManagerPostgres(InsertManagerPostgres::Credential credential) : 
+    credential_(credential),
     inserted_count_(0),
     start_time_(std::chrono::high_resolution_clock::now())
 {
@@ -1319,7 +1319,7 @@ void InsertManagerPostgres::alarm() {
       inserted_count_ += promises.size();
     });
     parallel_insert_actors_++;
-    td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos", credential.getConnectionString(), std::move(schema_blocks), std::move(P)).release();
+    td::actor::create_actor<InsertBatchMcSeqnos>("insert_batch_mc_seqnos", credential_.getConnectionString(), std::move(schema_blocks), std::move(P)).release();
   }
 
   if (!insert_queue_.empty() && scheduled) {
@@ -1329,44 +1329,46 @@ void InsertManagerPostgres::alarm() {
   }
 }
 
-void InsertManagerPostgres::insert(ParsedBlockPtr block_ds, td::Promise<td::Unit> promise) {
-  insert_queue_.push(std::move(block_ds));
-  promise_queue_.push(std::move(promise));
+void InsertManagerPostgres::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueStatus> queued_promise, td::Promise<td::Unit> inserted_promise) {
+  LOG(DEBUG) << "WIP: Inserting " << mc_seqno << " with " << block_ds->blocks_.size() << " blocks";
+  queued_promise.set_result(QueueStatus{1, 1, 0, 0});
+  // insert_queue_.push(std::move(block_ds));
+  // promise_queue_.push(std::move(promise));
 }
 
 void InsertManagerPostgres::upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) {
-  td::actor::create_actor<UpsertJettonWallet>("upsertjettonwallet", credential.getConnectionString(), std::move(jetton_wallet), std::move(promise)).release();
+  td::actor::create_actor<UpsertJettonWallet>("upsertjettonwallet", credential_.getConnectionString(), std::move(jetton_wallet), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) {
-  td::actor::create_actor<GetJettonWallet>("getjettonwallet", credential.getConnectionString(), std::move(address), std::move(promise)).release();
+  td::actor::create_actor<GetJettonWallet>("getjettonwallet", credential_.getConnectionString(), std::move(address), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) {
-  td::actor::create_actor<UpsertJettonMaster>("upsertjettonmaster", credential.getConnectionString(), std::move(jetton_wallet), std::move(promise)).release();
+  td::actor::create_actor<UpsertJettonMaster>("upsertjettonmaster", credential_.getConnectionString(), std::move(jetton_wallet), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) {
-  td::actor::create_actor<GetJettonMaster>("getjettonmaster", credential.getConnectionString(), std::move(address), std::move(promise)).release();
+  td::actor::create_actor<GetJettonMaster>("getjettonmaster", credential_.getConnectionString(), std::move(address), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::upsert_nft_collection(NFTCollectionData nft_collection, td::Promise<td::Unit> promise) {
-  td::actor::create_actor<UpsertNFTCollection>("upsertnftcollection", credential.getConnectionString(), std::move(nft_collection), std::move(promise)).release();
+  td::actor::create_actor<UpsertNFTCollection>("upsertnftcollection", credential_.getConnectionString(), std::move(nft_collection), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::get_nft_collection(std::string address, td::Promise<NFTCollectionData> promise) {
-  td::actor::create_actor<GetNFTCollection>("getnftcollection", credential.getConnectionString(), std::move(address), std::move(promise)).release();
+  td::actor::create_actor<GetNFTCollection>("getnftcollection", credential_.getConnectionString(), std::move(address), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::upsert_nft_item(NFTItemData nft_item, td::Promise<td::Unit> promise) {
-  td::actor::create_actor<UpsertNFTItem>("upsertnftitem", credential.getConnectionString(), std::move(nft_item), std::move(promise)).release();
+  td::actor::create_actor<UpsertNFTItem>("upsertnftitem", credential_.getConnectionString(), std::move(nft_item), std::move(promise)).release();
 }
 
 void InsertManagerPostgres::get_nft_item(std::string address, td::Promise<NFTItemData> promise) {
-  td::actor::create_actor<GetNFTItem>("getnftitem", credential.getConnectionString(), std::move(address), std::move(promise)).release();
+  td::actor::create_actor<GetNFTItem>("getnftitem", credential_.getConnectionString(), std::move(address), std::move(promise)).release();
 }
 
-std::string InsertManagerPostgres::PostgresCredential::getConnectionString()  {
+std::string InsertManagerPostgres::Credential::getConnectionString()  {
   return (
     "hostaddr=" + host +
     " port=" + std::to_string(port) + 
@@ -1381,7 +1383,7 @@ void InsertManagerPostgres::get_existing_seqnos(td::Promise<std::vector<std::uin
   LOG(INFO) << "Reading existing seqnos";
   std::vector<std::uint32_t> existing_mc_seqnos;
   try {
-    pqxx::connection c(credential.getConnectionString());
+    pqxx::connection c(credential_.getConnectionString());
     pqxx::work txn(c);
     for (auto [seqno]: txn.query<std::uint32_t>("select seqno from blocks where workchain = -1")) {
       existing_mc_seqnos.push_back(seqno);
