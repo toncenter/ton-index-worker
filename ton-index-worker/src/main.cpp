@@ -7,7 +7,6 @@
 #include "crypto/vm/cp0.h"
 
 #include "InsertManagerPostgres.h"
-#include "InsertManagerClickhouse.h"
 #include "DataParser.h"
 #include "DbScanner.h"
 #include "IndexScheduler.h"
@@ -20,7 +19,7 @@ int main(int argc, char *argv[]) {
     CHECK(vm::init_op_cp0());
 
     td::actor::ActorOwn<DbScanner> db_scanner_;
-    td::actor::ActorOwn<InsertManagerClickhouse> insert_manager_;
+    td::actor::ActorOwn<InsertManagerPostgres> insert_manager_;
     td::actor::ActorOwn<ParseManager> parse_manager_;
     td::actor::ActorOwn<IndexScheduler> index_scheduler_;
 
@@ -30,7 +29,7 @@ int main(int argc, char *argv[]) {
     td::uint32 last_known_seqno = 0;
     td::int32 max_db_actors = 32;
 
-    InsertManagerClickhouse::Credential credential;
+    InsertManagerPostgres::Credential credential;
     td::int32 batch_blocks_count = 512;
     td::int32 batch_txs_count = 32768;
     td::int32 batch_msgs_count = 65536;
@@ -149,14 +148,13 @@ int main(int argc, char *argv[]) {
     }
 
     td::actor::Scheduler scheduler({threads});
-    scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerClickhouse>("insertmanager", credential); });
+    scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential); });
     scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
     scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, last_known_seqno, max_db_actors); });
     
     scheduler.run_in_context([&] { index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), insert_manager_.get(), parse_manager_.get(), last_known_seqno); });
     scheduler.run_in_context([&] { td::actor::send_closure(index_scheduler_, &IndexScheduler::run); });
-    // scheduler.run_in_context([&] { td::actor::send_closure(index_scheduler_, &TestInterface::my_test_function); });
-
+    
     while(scheduler.run(1)) {
         // do something
     }

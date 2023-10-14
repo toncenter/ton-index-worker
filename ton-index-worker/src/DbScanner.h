@@ -21,15 +21,6 @@ private:
   td::actor::ActorOwn<ton::validator::ValidatorManagerInterface> validator_manager_;
   td::actor::ActorOwn<ton::validator::RootDb> db_;
   td::actor::ActorOwn<DbCacheWrapper> db_caching_;
-
-
-  // std::queue<std::uint32_t> seqnos_to_process_;
-  // std::set<std::uint32_t> seqnos_in_progress_;
-  // std::set<std::uint32_t> existing_mc_seqnos_;
-
-  // td::actor::ActorOwn<EventProcessor> event_processor_;
-  // td::actor::ActorId<InsertManagerInterface> insert_manager_;
-  // td::actor::ActorId<ParseManager> parse_manager_;
 public:
   DbScanner(std::string db_root, td::uint32 last_known_seqno, td::int32 max_db_actors) 
     : db_root_(db_root), last_known_seqno_(last_known_seqno), max_db_actors_(max_db_actors) {}
@@ -47,14 +38,6 @@ private:
   void set_last_mc_seqno(int mc_seqno);
   void catch_up_with_primary();
   void update_last_mc_seqno();
-
-  // void schedule_for_processing();
-  // void seqno_fetched(int mc_seqno, td::Result<MasterchainBlockDataState> blocks_data_state);
-  // void seqno_parsed(int mc_seqno, td::Result<ParsedBlockPtr> parsed_block);
-  // void interfaces_processed(int mc_seqno, ParsedBlockPtr parsed_block, td::Result<td::Unit> result);
-  // void got_existing_seqnos(td::Result<std::vector<std::uint32_t>> R);
-  // void seqno_completed(int mc_seqno);
-  // void reschedule_seqno(int mc_seqno);
 };
 
 struct BlockIdExtHasher {

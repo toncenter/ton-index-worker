@@ -7,14 +7,6 @@
 
 class InsertBatchClickhouse;
 
-struct InsertTaskStruct{
-    std::uint32_t mc_seqno_;
-    ParsedBlockPtr parsed_block_;
-    td::Promise<td::Unit> promise_;
-
-    QueueStatus get_queue_status();
-};
-
 class InsertManagerClickhouse: public InsertManagerInterface {
 public:
     struct Credential {

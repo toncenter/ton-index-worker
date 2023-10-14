@@ -141,7 +141,7 @@ public:
         promise.set_result(td::Unit());
       }
     });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_entity<T>, data, std::move(P));
+    // td::actor::send_closure(insert_manager_, &InsertManagerInterface::upsert_entity<T>, data, std::move(P));
   }
 };
 

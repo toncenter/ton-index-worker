@@ -222,6 +222,8 @@ void InsertBatchClickhouse::insert_blocks(clickhouse::Client &client){
     for(auto& task_ : insert_tasks_) {
         task_.promise_.set_result(td::Unit());
     }
+
+    stop();
 }
 
 QueueStatus InsertTaskStruct::get_queue_status() {
