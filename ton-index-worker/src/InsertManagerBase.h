@@ -16,6 +16,11 @@ class InsertManagerBase: public InsertManagerInterface {
 public:
     void set_batch_blocks_count(int value) { batch_blocks_count_ = value; }
     void set_parallel_inserts_actors(int value) { max_parallel_insert_actors_ = value; }
+    void set_insert_blocks(int value) { max_insert_blocks_ = value; }
+    void set_insert_txs(int value) { max_insert_txs_ = value; }
+    void set_insert_msgs(int value) { max_insert_msgs_ = value; }
+    
+    void print_info();
 
     void start_up() override;
     void alarm() override;
