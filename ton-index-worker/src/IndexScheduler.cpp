@@ -1,9 +1,35 @@
 #include "IndexScheduler.h"
 #include "td/utils/Time.h"
+#include "td/utils/StringBuilder.h"
+#include <iostream>
 
 
 void IndexScheduler::start_up() {
     event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
+}
+
+std::string get_time_string(double seconds) {
+    int days = int(seconds / (60 * 60 * 24));
+    int hours = int(seconds / (60 * 60)) % 24;
+    int mins = int(seconds / 60) % 60;
+    int secs = int(seconds) % 60;
+
+    td::StringBuilder builder;
+    bool flag = false;
+    if (days > 0) {
+        builder << days << " days ";
+        flag = true;
+    }
+    if (flag || (hours > 0)) {
+        builder << hours << " hours ";
+        flag = true;
+    }
+    if (flag || (mins > 0)) {
+        builder << mins << " min ";
+        flag = true;
+    }
+    builder << secs << " sec";
+    return builder.as_cslice().str();
 }
 
 void IndexScheduler::alarm() {
@@ -11,11 +37,12 @@ void IndexScheduler::alarm() {
     std::double_t alpha = 0.7;
     avg_tps_ = alpha * avg_tps_ + (1 - alpha) * (existing_seqnos_.size() - last_existing_seqno_count_);
     last_existing_seqno_count_ = existing_seqnos_.size();
-    double eta = (last_known_seqno_ - last_indexed_seqno_) / avg_tps_ / 60;
+    double eta = (last_known_seqno_ - last_indexed_seqno_) / avg_tps_;
+    
 
     LOG(INFO) << "Indexed: " << last_indexed_seqno_ << " / " << last_known_seqno_ 
               << "\tBlock/sec: " << avg_tps_
-              << "\tETA: " << eta << " min"
+              << "\tETA: " << get_time_string(eta)
               << "\tQ[" << cur_queue_status_.mc_blocks_ << "M, " 
               << cur_queue_status_.blocks_ << "b, " 
               << cur_queue_status_.txs_ << "t, " 
