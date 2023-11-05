@@ -29,7 +29,7 @@ target_link_directories(ton-index-worker
 target_compile_features(ton-index-worker PRIVATE cxx_std_17)
 target_link_libraries(ton-index-worker overlay tdutils tdactor adnl tl_api dht ton_crypto
         catchain validatorsession validator-disk ton_validator validator-disk smc-envelope
-        pqxx pq) # clickhouse-cpp-lib)
+        pqxx) # clickhouse-cpp-lib)
 
 set(TLB_TOKENS
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tokens.cpp
