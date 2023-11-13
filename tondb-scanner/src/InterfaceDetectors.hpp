@@ -60,7 +60,7 @@ public:
           stop();
           return;
         case block::gen::Account::account: {
-          auto account_r = ParseQuery::parse_account(account_root);
+          auto account_r = ParseQuery::parse_account(account_root, sstate.gen_utime);
           if (account_r.is_error()) {
             promise_.set_error(account_r.move_as_error());
             stop();

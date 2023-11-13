@@ -609,7 +609,7 @@ void InsertBatchMcSeqnos::insert_messages_txs(const std::vector<TxMsg>& tx_msgs,
 
 void InsertBatchMcSeqnos::insert_account_states(pqxx::work &transaction, const std::vector<ParsedBlockPtr>& mc_blocks) {
   std::ostringstream query;
-  query << "INSERT INTO account_states (hash, account, balance, account_status, frozen_hash, code_hash, data_hash) VALUES ";
+  query << "INSERT INTO account_states (hash, account, balance, timestamp, account_status, frozen_hash, code_hash, data_hash) VALUES ";
   bool is_first = true;
   for (const auto& mc_block : mc_blocks) {
     for (const auto& account_state : mc_block->account_states_) {
@@ -622,6 +622,7 @@ void InsertBatchMcSeqnos::insert_account_states(pqxx::work &transaction, const s
             << TO_SQL_STRING(td::base64_encode(account_state.hash.as_slice())) << ","
             << TO_SQL_STRING(convert::to_raw_address(account_state.account)) << ","
             << account_state.balance << ","
+            << account_state.timestamp << ","
             << TO_SQL_STRING(account_state.account_status) << ","
             << TO_SQL_OPTIONAL_STRING(account_state.frozen_hash) << ","
             << TO_SQL_OPTIONAL_STRING(account_state.code_hash) << ","
