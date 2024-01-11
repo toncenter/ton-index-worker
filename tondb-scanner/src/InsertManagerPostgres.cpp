@@ -1,4 +1,3 @@
-#include <chrono>
 #include <mutex>
 #include "td/utils/JsonBuilder.h"
 #include "InsertManagerPostgres.h"
@@ -23,6 +22,22 @@ std::string content_to_json_string(const std::map<std::string, std::string> &con
   return jetton_content_json.string_builder().as_cslice().str();
 }
 
+
+std::string InsertManagerPostgres::Credential::get_connection_string()  {
+  return (
+    "hostaddr=" + host +
+    " port=" + std::to_string(port) + 
+    (user.length() ? " user=" + user : "") +
+    (password.length() ? " password=" + password : "") +
+    (dbname.length() ? " dbname=" + dbname : "")
+  );
+}
+
+
+
+//
+// BitHasher
+//
 struct BitArrayHasher {
   std::size_t operator()(const td::Bits256& k) const {
     std::size_t seed = 0;
@@ -32,13 +47,21 @@ struct BitArrayHasher {
     return seed;
   }
 };
+
+
 // This set is used as a synchronization mechanism to prevent multiple queries for the same message
 // Otherwise Posgres will throw an error deadlock_detected
 std::unordered_set<td::Bits256, BitArrayHasher> messages_in_progress;
 std::unordered_set<td::Bits256, BitArrayHasher> msg_bodies_in_progress;
 std::mutex messages_in_progress_mutex;
 
-void InsertBatchMcSeqnos::start_up() {
+
+//
+// InsertBatchPostgres
+//
+void InsertBatchPostgres::start_up() {
+  connection_string_ = credential_.get_connection_string();
+
   std::vector<schema::Message> messages;
   std::vector<TxMsg> tx_msgs;
   std::vector<MsgBody> msg_bodies;

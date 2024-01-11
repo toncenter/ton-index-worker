@@ -8,6 +8,20 @@
 #define TO_SQL_OPTIONAL(x) ((x) ? std::to_string(x.value()) : "NULL")
 #define TO_SQL_OPTIONAL_STRING(x) ((x) ? ("'" + x.value() + "'") : "NULL")
 
+std::string content_to_json_string(const std::map<std::string, std::string> &content) {
+  td::JsonBuilder jetton_content_json;
+  auto obj = jetton_content_json.enter_object();
+  for (auto &attr : content) {
+    auto value = attr.second;
+    // We erase all \0 bytes because Postgres can't contain such strings
+    value.erase(std::remove(value.begin(), value.end(), '\0'), value.end());
+    obj(attr.first, value);
+  }
+  obj.leave();
+
+  return jetton_content_json.string_builder().as_cslice().str();
+}
+
 
 std::string InsertManagerPostgres::Credential::get_connection_string()  {
   return (

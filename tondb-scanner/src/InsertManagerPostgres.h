@@ -1,9 +1,10 @@
 #pragma once
 #include <queue>
 #include <pqxx/pqxx>
-#include "InsertManager.h"
+#include "InsertManagerBase.h"
 
-class InsertBatchMcSeqnos;
+
+class InsertBatchPostgres;
 
 class InsertManagerPostgres: public InsertManagerInterface {
 private:

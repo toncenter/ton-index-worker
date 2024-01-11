@@ -17,7 +17,7 @@ private:
   td::int32 max_db_actors_{32};
   td::int32 max_db_cache_size_{256};
   std::atomic<td::uint32> active_fetches;
-  
+
   td::actor::ActorOwn<ton::validator::ValidatorManagerInterface> validator_manager_;
   td::actor::ActorOwn<ton::validator::RootDb> db_;
   td::actor::ActorOwn<DbCacheWrapper> db_caching_;
