@@ -141,6 +141,20 @@ void IndexScheduler::seqno_fetched(std::uint32_t mc_seqno, MasterchainBlockDataS
 void IndexScheduler::seqno_parsed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
     LOG(DEBUG) << "Parsed seqno " << mc_seqno;
 
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno, parsed_block](td::Result<td::Unit> R) {
+        if (R.is_error()) {
+            LOG(ERROR) << "Failed to process interfaces for  seqno " << mc_seqno << ": " << R.move_as_error();
+            td::actor::send_closure(SelfId, &IndexScheduler::reschedule_seqno, mc_seqno);
+            return;
+        }
+        td::actor::send_closure(SelfId, &IndexScheduler::seqno_interfaces_processed, mc_seqno, std::move(parsed_block));
+    });
+    td::actor::send_closure(event_processor_, &EventProcessor::process, mc_seqno, std::move(parsed_block), std::move(P));
+}
+
+void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
+    LOG(DEBUG) << "Interfaces processed for seqno " << mc_seqno;
+
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<td::Unit> R) {
         if (R.is_error()) {
             LOG(ERROR) << "Failed to insert seqno " << mc_seqno << ": " << R.move_as_error();
