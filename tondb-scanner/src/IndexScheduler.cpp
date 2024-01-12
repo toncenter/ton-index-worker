@@ -149,7 +149,7 @@ void IndexScheduler::seqno_parsed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_
         }
         td::actor::send_closure(SelfId, &IndexScheduler::seqno_interfaces_processed, mc_seqno, std::move(parsed_block));
     });
-    td::actor::send_closure(event_processor_, &EventProcessor::process, mc_seqno, std::move(parsed_block), std::move(P));
+    td::actor::send_closure(event_processor_, &EventProcessor::process, std::move(parsed_block), std::move(P));
 }
 
 void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
