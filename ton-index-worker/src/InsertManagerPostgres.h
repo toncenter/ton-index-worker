@@ -25,14 +25,14 @@ public:
   void create_insert_actor(std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise) override;
   void get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) override;
 
-  // void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) override;
-  // void get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) override;
-  // void upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) override;
-  // void get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) override;
-  // void upsert_nft_collection(NFTCollectionData nft_collection, td::Promise<td::Unit> promise) override;
-  // void get_nft_collection(std::string address, td::Promise<NFTCollectionData> promise) override;
-  // void upsert_nft_item(NFTItemData nft_item, td::Promise<td::Unit> promise) override;
-  // void get_nft_item(std::string address, td::Promise<NFTItemData> promise) override;
+  void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) override;
+  void get_jetton_wallet(std::string address, td::Promise<JettonWalletData> promise) override;
+  void upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) override;
+  void get_jetton_master(std::string address, td::Promise<JettonMasterData> promise) override;
+  void upsert_nft_collection(NFTCollectionData nft_collection, td::Promise<td::Unit> promise) override;
+  void get_nft_collection(std::string address, td::Promise<NFTCollectionData> promise) override;
+  void upsert_nft_item(NFTItemData nft_item, td::Promise<td::Unit> promise) override;
+  void get_nft_item(std::string address, td::Promise<NFTItemData> promise) override;
 };
 
 
@@ -78,6 +78,7 @@ private:
   void insert_messages_impl(const std::vector<schema::Message>& messages, pqxx::work& transaction);
   void insert_messages_txs(const std::vector<TxMsg>& messages, pqxx::work& transaction);
   void insert_account_states(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
+  void insert_latest_account_states(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
   void insert_jetton_transfers(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
   void insert_jetton_burns(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
   void insert_nft_transfers(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);

@@ -14,11 +14,6 @@
 
 // process ParsedBlock and try detect master and wallet interfaces
 void EventProcessor::process(ParsedBlockPtr block, td::Promise<> &&promise) {
-  // TODO: REMOVE ME FOR NON-PERFNET!
-  promise.set_result(td::Unit());
-  return;
-
-
   auto P = td::PromiseCreator::lambda([SelfId=actor_id(this), block, promise = std::move(promise)](td::Result<td::Unit> res) mutable {
     if (res.is_error()) {
       promise.set_error(res.move_as_error_prefix("Failed to process account states for mc block " + std::to_string(block->blocks_[0].seqno) + ": "));
