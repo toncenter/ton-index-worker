@@ -14,8 +14,8 @@ struct InsertTaskStruct{
 
 class InsertManagerBase: public InsertManagerInterface {
 public:
-    void set_batch_blocks_count(int value) { batch_blocks_count_ = value; }
     void set_parallel_inserts_actors(int value) { max_parallel_insert_actors_ = value; }
+    void set_insert_mc_blocks(int value) { max_insert_mc_blocks_ = value; }
     void set_insert_blocks(int value) { max_insert_blocks_ = value; }
     void set_insert_txs(int value) { max_insert_txs_ = value; }
     void set_insert_msgs(int value) { max_insert_msgs_ = value; }
@@ -32,12 +32,11 @@ private:
     std::queue<InsertTaskStruct> insert_queue_;
     QueueStatus queue_status_{0, 0, 0, 0};
 
-    td::int32 batch_blocks_count_{512};
     td::int32 max_parallel_insert_actors_{32};
     td::int32 parallel_insert_actors_{0};
 
     td::int32 max_insert_mc_blocks_{1024};
-    td::int32 max_insert_blocks_{2048};
+    td::int32 max_insert_blocks_{1024};
     td::int32 max_insert_txs_{32768};
     td::int32 max_insert_msgs_{65536};
 

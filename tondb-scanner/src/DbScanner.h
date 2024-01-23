@@ -14,7 +14,6 @@ class DbScanner: public td::actor::Actor {
 private:
   std::string db_root_;
   td::uint32 last_known_seqno_{0};
-  td::int32 max_db_actors_{32};
   td::int32 max_db_cache_size_{256};
   std::atomic<td::uint32> active_fetches;
 
@@ -22,8 +21,8 @@ private:
   td::actor::ActorOwn<ton::validator::RootDb> db_;
   td::actor::ActorOwn<DbCacheWrapper> db_caching_;
 public:
-  DbScanner(std::string db_root, td::uint32 last_known_seqno, td::int32 max_db_actors) 
-    : db_root_(db_root), last_known_seqno_(last_known_seqno), max_db_actors_(max_db_actors) {}
+  DbScanner(std::string db_root, td::uint32 last_known_seqno) 
+    : db_root_(db_root), last_known_seqno_(last_known_seqno) {}
 
   td::uint32 get_last_known_seqno() {
     return last_known_seqno_;

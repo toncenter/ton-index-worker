@@ -125,7 +125,7 @@ void IndexScheduler::reschedule_seqno(std::uint32_t mc_seqno) {
 }
 
 void IndexScheduler::seqno_fetched(std::uint32_t mc_seqno, MasterchainBlockDataState block_data_state) {
-    LOG(DEBUG) << "Fetched seqno " << mc_seqno << ": blocks=" << block_data_state.size();
+    LOG(DEBUG) << "Fetched seqno " << mc_seqno << ": blocks=" << block_data_state.shard_blocks_diff_.size() << " shards=" << block_data_state.shard_blocks_.size();
 
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<ParsedBlockPtr> R) {
         if (R.is_error()) {

@@ -241,6 +241,7 @@ struct Block {
   bool after_merge;
   bool before_split;
   bool after_split;
+  bool want_merge;
   bool want_split;
   bool key_block;
   bool vert_seqno_incr;
@@ -368,7 +369,12 @@ struct BlockDataState {
   td::Ref<ton::validator::ShardState> block_state;
 };
 
-using MasterchainBlockDataState = std::vector<BlockDataState>;
+// using MasterchainBlockDataState = std::vector<BlockDataState>;
+struct MasterchainBlockDataState {
+  std::vector<BlockDataState> shard_blocks_;  // shard state like /shards method
+  std::vector<BlockDataState> shard_blocks_diff_;  // blocks corresponding to mc_block.
+};
+
 using BlockchainEvent = std::variant<JettonTransfer, 
                                      JettonBurn,
                                      NFTTransfer>;

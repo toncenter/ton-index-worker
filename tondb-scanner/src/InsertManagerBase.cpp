@@ -27,14 +27,12 @@ void InsertManagerBase::alarm() {
 
 void InsertManagerBase::print_info() {
   LOG(INFO) << "Insert manager(parallel=" << max_parallel_insert_actors_
-            << ", batch_size=" << batch_blocks_count_
-            << ", max_mc_blocks=" << max_insert_mc_blocks_
-            << ", max_blocks=" << max_insert_blocks_
-            << ", max_txs=" << max_insert_txs_
-            << ", max_msgs=" << max_insert_msgs_
+            << ", max_batch_mc_blocks=" << max_insert_mc_blocks_
+            << ", max_batch_blocks=" << max_insert_blocks_
+            << ", max_batch_txs=" << max_insert_txs_
+            << ", max_batch_msgs=" << max_insert_msgs_
             << ")";
 }
-
 
 
 void InsertManagerBase::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueStatus> queued_promise, td::Promise<td::Unit> inserted_promise) {    

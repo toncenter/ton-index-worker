@@ -34,8 +34,13 @@ private:
   QueueStatus cur_queue_status_;
 public:
   IndexScheduler(td::actor::ActorId<DbScanner> db_scanner, td::actor::ActorId<InsertManagerInterface> insert_manager,
-    td::actor::ActorId<ParseManager> parse_manager, std::int32_t last_known_seqno = 0)
-    : db_scanner_(db_scanner), insert_manager_(insert_manager), parse_manager_(parse_manager), last_known_seqno_(last_known_seqno) {};
+      td::actor::ActorId<ParseManager> parse_manager, std::int32_t last_known_seqno = 0,
+      std::uint32_t max_active_tasks = 32, std::uint32_t max_queue_mc_blocks = 16384, std::uint32_t max_queue_blocks = 16384, 
+      std::uint32_t max_queue_txs = 524288, std::uint32_t max_queue_msgs = 524288)
+    : db_scanner_(db_scanner), insert_manager_(insert_manager), parse_manager_(parse_manager), 
+      last_known_seqno_(last_known_seqno), max_active_tasks_(max_active_tasks),
+      max_queue_mc_blocks_(max_queue_mc_blocks), max_queue_blocks_(max_queue_blocks),
+      max_queue_txs_(max_queue_txs), max_queue_msgs_(max_queue_msgs) {};
 
   void start_up() override;
   void alarm() override;

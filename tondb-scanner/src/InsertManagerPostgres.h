@@ -17,8 +17,12 @@ public:
 
     std::string get_connection_string();
   };
+  struct Options {
+    
+  };
 private:
   InsertManagerPostgres::Credential credential_;
+  InsertManagerPostgres::Options options_;
 public:
   InsertManagerPostgres(InsertManagerPostgres::Credential credential) : credential_(credential) {}
   

@@ -292,7 +292,8 @@ public:
       return;
     }
 
-    result_.push_back({mc_block_data_, mc_block_state_});
+    result_.shard_blocks_.push_back({mc_block_data_, mc_block_state_});
+    result_.shard_blocks_diff_.push_back({mc_block_data_, mc_block_state_});
 
     fetch_all_shard_blocks_between_current_and_prev_mc_blocks();
   }
@@ -305,11 +306,14 @@ public:
       blocks_queue_.push(s->top_block_id());
     }
 
-    process_blocks_queue();
+    process_blocks_queue(true);
   }
 
-  void process_blocks_queue() {
+  void process_blocks_queue(bool to_shards) {
     if (blocks_queue_.empty()) {
+      // LOG(INFO) << "mc_seqno: " << result_.shard_blocks_[0].block_state->get_seqno() 
+      //           << " shards: " << result_.shard_blocks_.size() 
+      //           << " diff: " << result_.shard_blocks_diff_.size();
       promise_.set_value(std::move(result_));
       stop();
       return;
@@ -319,7 +323,7 @@ public:
       if (R.is_error()) {
         td::actor::send_closure(SelfId, &IndexQuery::error, R.move_as_error());
       } else {
-        td::actor::send_closure(SelfId, &IndexQuery::process_blocks_queue);
+        td::actor::send_closure(SelfId, &IndexQuery::process_blocks_queue, false);
       }
     });
 
@@ -328,32 +332,35 @@ public:
     ig.add_promise(std::move(P));
 
     bool no_shard_blocks = true;
+    // LOG(INFO) << "mc_seqno: " <<  mc_block_state_->get_seqno()
+    //           << " queue size: " << blocks_queue_.size() 
+    //           << " result size: " << result_.shard_blocks_diff_.size() 
+    //           << " (" << result_.shard_blocks_.size() << ")";
     while (!blocks_queue_.empty()) {
       auto blk = blocks_queue_.front();
       blocks_queue_.pop();
       
-      bool skip = false;
+      bool to_diff = true;
       for (auto& prev_shard : mc_prev_block_state_->get_shards()) {
         if (prev_shard->top_block_id() == blk) {
-          skip = true;
+          to_diff = false;
           break;
         }
       }
       if (std::find(shard_block_ids_.begin(), shard_block_ids_.end(), blk) != shard_block_ids_.end()) {
-        skip = true;
+        to_diff = false;
       }
-      if (skip) {
+      if (!(to_shards || to_diff)) {
         continue;
       }
       shard_block_ids_.push_back(blk);
 
       no_shard_blocks = false;
-      
-      auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this), blk, promise = ig.get_promise()](td::Result<BlockDataState> R) mutable {
+      auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this), blk, to_diff, to_shards, promise = ig.get_promise()](td::Result<BlockDataState> R) mutable {
         if (R.is_error()) {
           promise.set_error(R.move_as_error_prefix(PSTRING() << blk.to_str() << ": "));
         } else {
-          td::actor::send_closure(SelfId, &IndexQuery::got_shard_block, R.move_as_ok());
+          td::actor::send_closure(SelfId, &IndexQuery::got_shard_block, R.move_as_ok(), to_diff, to_shards);
           promise.set_value(td::Unit());
         }
       });
@@ -361,21 +368,29 @@ public:
     }
 
     if (no_shard_blocks) {
+      // LOG(INFO) << "mc_seqno: " << result_.shard_blocks_[0].block_state->get_seqno() 
+      //           << " shards: " << result_.shard_blocks_.size() 
+      //           << " diff: " << result_.shard_blocks_diff_.size();
       promise_.set_value(std::move(result_));
       stop();
     }
   }
 
-  void got_shard_block(BlockDataState block_data_state) {
+  void got_shard_block(BlockDataState block_data_state, bool to_diff, bool to_shards) {
     std::vector<ton::BlockIdExt> prev;
     ton::BlockIdExt mc_blkid;
     bool after_split;
     auto res = block::unpack_block_prev_blk_ext(block_data_state.block_data->root_cell(), block_data_state.block_data->block_id(), prev, mc_blkid, after_split);
-    for (auto& p: prev) {
-      blocks_queue_.push(p);
-    }
 
-    result_.push_back(std::move(block_data_state));
+    if (to_diff) {
+      for (auto& p: prev) {
+        blocks_queue_.push(p);
+      }
+      result_.shard_blocks_diff_.push_back(block_data_state);  // std::move was removed here
+    }
+      
+    if (to_shards)
+      result_.shard_blocks_.push_back(block_data_state);
   }
 
   void error(td::Status error) {

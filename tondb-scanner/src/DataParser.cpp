@@ -24,7 +24,7 @@ void ParseQuery::start_up() {
 
 td::Status ParseQuery::parse_impl() {
   td::optional<schema::Block> mc_block;
-  for (auto &block_ds : mc_block_) {
+  for (auto &block_ds : mc_block_.shard_blocks_diff_) {
     // common block info
     block::gen::Block::Record blk;
     block::gen::BlockInfo::Record info;
@@ -70,6 +70,7 @@ schema::Block ParseQuery::parse_block(const ton::BlockIdExt& blk_id, block::gen:
   block.after_merge = info.after_merge;
   block.before_split = info.before_split;
   block.after_split = info.after_split;
+  block.want_merge = info.want_merge;
   block.want_split = info.want_split;
   block.key_block = info.key_block;
   block.vert_seqno_incr = info.vert_seqno_incr;
