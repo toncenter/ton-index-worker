@@ -76,6 +76,7 @@ private:
   std::string jsonify(schema::TransactionDescr descr);
 
   void insert_blocks(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
+  void insert_shard_state(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
   void insert_transactions(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
   void insert_messsages(pqxx::work &transaction, const std::vector<schema::Message> &messages, const std::vector<MsgBody>& msg_bodies, const std::vector<TxMsg> &tx_msgs);
   void insert_messages_contents(const std::vector<MsgBody>& msg_bodies, pqxx::work& transaction);

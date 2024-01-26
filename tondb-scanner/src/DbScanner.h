@@ -21,8 +21,8 @@ private:
   td::actor::ActorOwn<ton::validator::RootDb> db_;
   td::actor::ActorOwn<DbCacheWrapper> db_caching_;
 public:
-  DbScanner(std::string db_root, td::uint32 last_known_seqno) 
-    : db_root_(db_root), last_known_seqno_(last_known_seqno) {}
+  DbScanner(std::string db_root, td::uint32 last_known_seqno, td::int32 max_db_cache_size = 256) 
+    : db_root_(db_root), last_known_seqno_(last_known_seqno), max_db_cache_size_(max_db_cache_size) {}
 
   td::uint32 get_last_known_seqno() {
     return last_known_seqno_;

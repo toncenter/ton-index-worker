@@ -41,6 +41,9 @@ void InsertManagerBase::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, 
     insert_queue_.push(std::move(task));
     queue_status_ += status_delta;
     queued_promise.set_result(queue_status_);
+    // // Debug
+    // queued_promise.set_result(queue_status_);
+    // inserted_promise.set_result(td::Unit());
 }
 
 

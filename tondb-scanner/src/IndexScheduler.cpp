@@ -17,36 +17,33 @@ std::string get_time_string(double seconds) {
     td::StringBuilder builder;
     bool flag = false;
     if (days > 0) {
-        builder << days << " days ";
+        builder << days << "d ";
         flag = true;
     }
     if (flag || (hours > 0)) {
-        builder << hours << " hours ";
+        builder << hours << "h ";
         flag = true;
     }
     if (flag || (mins > 0)) {
-        builder << mins << " min ";
+        builder << mins << "m ";
         flag = true;
     }
-    builder << secs << " sec";
+    builder << secs << "s";
     return builder.as_cslice().str();
 }
 
 void IndexScheduler::alarm() {
     alarm_timestamp() = td::Timestamp::in(1.0);
-    std::double_t alpha = 0.7;
+    std::double_t alpha = 0.9;
+    if (last_existing_seqno_count_ == 0) 
+        last_existing_seqno_count_ = existing_seqnos_.size();
     avg_tps_ = alpha * avg_tps_ + (1 - alpha) * (existing_seqnos_.size() - last_existing_seqno_count_);
     last_existing_seqno_count_ = existing_seqnos_.size();
-    double eta = (last_known_seqno_ - last_indexed_seqno_) / avg_tps_;
     
-
-    LOG(INFO) << "Indexed: " << last_indexed_seqno_ << " / " << last_known_seqno_ 
-              << "\tBlock/sec: " << avg_tps_
-              << "\tETA: " << get_time_string(eta)
-              << "\tQ[" << cur_queue_status_.mc_blocks_ << "M, " 
-              << cur_queue_status_.blocks_ << "b, " 
-              << cur_queue_status_.txs_ << "t, " 
-              << cur_queue_status_.msgs_ << "m]";
+    if (next_print_stats_.is_in_past()) {
+        print_stats();
+        next_print_stats_ = td::Timestamp::in(stats_timeout_);
+    }
 
     auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueStatus> R){
         R.ensure();
@@ -168,6 +165,17 @@ void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBl
         td::actor::send_closure(SelfId, &IndexScheduler::seqno_queued_to_insert, mc_seqno, R.move_as_ok());
     });
     td::actor::send_closure(insert_manager_, &InsertManagerInterface::insert, mc_seqno, std::move(parsed_block), std::move(Q), std::move(P));
+}
+
+void IndexScheduler::print_stats() {
+    double eta = (last_known_seqno_ - last_indexed_seqno_) / avg_tps_;
+    LOG(INFO) << "Last: " << last_indexed_seqno_ << " / " << last_known_seqno_ 
+              << "\tBlk/s: " << avg_tps_
+              << "\tETA: " << get_time_string(eta)
+              << "\tQ[" << cur_queue_status_.mc_blocks_ << "M, " 
+              << cur_queue_status_.blocks_ << "b, " 
+              << cur_queue_status_.txs_ << "t, " 
+              << cur_queue_status_.msgs_ << "m]";
 }
 
 void IndexScheduler::seqno_queued_to_insert(std::uint32_t mc_seqno, QueueStatus status) {

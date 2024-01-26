@@ -305,6 +305,8 @@ public:
     for (auto& s : current_shards) {
       blocks_queue_.push(s->top_block_id());
     }
+    // LOG(INFO) << "seqno: " << mc_block_state_->get_block_id().seqno()
+    //           << " queue: " << blocks_queue_.size();
 
     process_blocks_queue(true);
   }

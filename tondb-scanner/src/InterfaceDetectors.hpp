@@ -474,7 +474,6 @@ public:
     }
 
     JettonTransfer transfer;
-    transfer.tenant_id = transaction.tenant_id;
     transfer.transaction_hash = transaction.hash;
     transfer.query_id = transfer_record.query_id;
     transfer.amount = block::tlb::t_VarUInteger_16.as_integer(transfer_record.amount);
@@ -536,7 +535,6 @@ public:
     }
 
     JettonBurn burn;
-    burn.tenant_id = transaction.tenant_id;
     burn.transaction_hash = transaction.hash;
     burn.query_id = burn_record.query_id;
     if (!transaction.in_msg || !transaction.in_msg->source) {
@@ -803,7 +801,6 @@ public:
     }
 
     NFTTransfer transfer;
-    transfer.tenant_id = transaction.tenant_id;
     transfer.transaction_hash = transaction.hash;
     transfer.query_id = transfer_record.query_id;
     transfer.nft_item = transaction.account;

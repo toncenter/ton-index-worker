@@ -48,8 +48,19 @@ td::Status ParseQuery::parse_impl() {
 
     result->blocks_.push_back(schema_block);
   }
+
+  // shard details
+  for (auto &block_ds : mc_block_.shard_blocks_) {
+    auto shard_block = parse_shard_state(mc_block.value().seqno, block_ds.block_data->block_id());
+    result->shard_state_.push_back(shard_block);
+  }
+
   result->mc_block_ = mc_block_;
   return td::Status::OK();
+}
+
+schema::MasterchainBlockShard ParseQuery::parse_shard_state(td::uint32 mc_seqno, const ton::BlockIdExt& shard_blk_id) {
+  return {mc_seqno, shard_blk_id.id.workchain, static_cast<int64_t>(shard_blk_id.id.shard), shard_blk_id.id.seqno};
 }
 
 schema::Block ParseQuery::parse_block(const ton::BlockIdExt& blk_id, block::gen::Block::Record& blk, const block::gen::BlockInfo::Record& info, 
@@ -64,6 +75,11 @@ schema::Block ParseQuery::parse_block(const ton::BlockIdExt& blk_id, block::gen:
       block.mc_block_workchain = mc_block.value().workchain;
       block.mc_block_shard = mc_block.value().shard;
       block.mc_block_seqno = mc_block.value().seqno;
+  }
+  else if (block.workchain == -1) {
+      block.mc_block_workchain = block.workchain;
+      block.mc_block_shard = block.shard;
+      block.mc_block_seqno = block.seqno;
   }
   block.global_id = blk.global_id;
   block.version = info.version;
@@ -525,7 +541,6 @@ td::Result<std::vector<schema::Transaction>> ParseQuery::parse_transactions(cons
         schema::Transaction schema_tx;
 
         schema_tx.account = block::StdAddress(blk_id.id.workchain, cur_addr);
-        schema_tx.tenant_id = ton::shard_prefix(schema_tx.account.addr, 60) % CITUS_SHARDS;
         schema_tx.hash = tvalue->get_hash().bits();
         schema_tx.lt = trans.lt;
         schema_tx.prev_trans_hash = trans.prev_trans_hash;
@@ -540,14 +555,12 @@ td::Result<std::vector<schema::Transaction>> ParseQuery::parse_transactions(cons
         if (trans.r1.in_msg->prefetch_long(1)) {
           auto msg = trans.r1.in_msg->prefetch_ref();
           TRY_RESULT_ASSIGN(schema_tx.in_msg, parse_message(trans.r1.in_msg->prefetch_ref()));
-          schema_tx.in_msg->tenant_id = schema_tx.tenant_id;
         }
 
         if (trans.outmsg_cnt != 0) {
           vm::Dictionary dict{trans.r1.out_msgs, 15};
           for (int x = 0; x < trans.outmsg_cnt; x++) {
             TRY_RESULT(out_msg, parse_message(dict.lookup_ref(td::BitArray<15>{x})));
-            out_msg.tenant_id = schema_tx.tenant_id;
             schema_tx.out_msgs.push_back(std::move(out_msg));
           }
         }
@@ -623,8 +636,6 @@ td::Result<schema::AccountState> ParseQuery::parse_account(td::Ref<vm::Cell> acc
   TRY_RESULT_ASSIGN(schema_account.balance, convert::to_balance(storage.balance));
   schema_account.timestamp = gen_utime;
   schema_account.last_trans_lt = storage.last_trans_lt;
-  
-  schema_account.tenant_id = ton::shard_prefix(schema_account.account.addr, 60) % CITUS_SHARDS;
   
   int account_state_tag = block::gen::t_AccountState.get_tag(storage.state.write());
   switch (account_state_tag) {

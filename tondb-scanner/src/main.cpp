@@ -27,8 +27,10 @@ int main(int argc, char *argv[]) {
 
   // options
   td::uint32 threads = 7;
+  td::int32 stats_timeout = 10;
   std::string db_root;
   td::uint32 last_known_seqno = 0;
+  td::int32 max_db_cache_size = 1024;
 
   InsertManagerPostgres::Credential credential;
 
@@ -37,10 +39,10 @@ int main(int argc, char *argv[]) {
   std::uint32_t max_queue_txs = 500000;
   std::uint32_t max_queue_msgs = 500000;
   
-  std::uint32_t max_insert_actors = 3;
-  std::uint32_t max_batch_blocks = 1000;
-  std::uint32_t max_batch_txs = 10000;
-  std::uint32_t max_batch_msgs = 10000;
+  std::uint32_t max_insert_actors = 12;
+  std::uint32_t max_batch_blocks = 10000;
+  std::uint32_t max_batch_txs = 50000;
+  std::uint32_t max_batch_msgs = 50000;
   
   td::OptionParser p;
   p.set_description("Parse TON DB and insert data into Postgres");
@@ -184,6 +186,16 @@ int main(int argc, char *argv[]) {
     threads = v;
     return td::Status::OK();
   });
+  p.add_checked_option('\0', "stats-freq", "Pause between printing stats in seconds", [&](td::Slice fname) { 
+    int v;
+    try {
+      v = std::stoi(fname.str());
+    } catch (...) {
+      return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: not a number");
+    }
+    stats_timeout = v;
+    return td::Status::OK();
+  });
   auto S = p.run(argc, argv);
   if (S.is_error()) {
     LOG(ERROR) << "failed to parse options: " << S.move_as_error();
@@ -193,10 +205,10 @@ int main(int argc, char *argv[]) {
   td::actor::Scheduler scheduler({threads});
   scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential); });
   scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
-  scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, last_known_seqno); });
+  scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, last_known_seqno, max_db_cache_size); });
 
   scheduler.run_in_context([&] { index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-    insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue_blocks, max_queue_blocks, max_queue_txs, max_queue_msgs); 
+    insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue_blocks, max_queue_blocks, max_queue_txs, max_queue_msgs, stats_timeout); 
   });
   scheduler.run_in_context([&] { 
     td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_parallel_inserts_actors, max_insert_actors);
