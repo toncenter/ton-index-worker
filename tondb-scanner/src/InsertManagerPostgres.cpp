@@ -417,13 +417,39 @@ std::string InsertBatchPostgres::jsonify(schema::TransactionDescr descr) {
 }
 
 
+std::string InsertBatchPostgres::jsonify(const schema::BlockReference& block_ref) {
+  td::JsonBuilder jb;
+  auto obj = jb.enter_object();
+
+  obj("workchain", td::JsonInt(block_ref.workchain));
+  obj("shard", td::JsonLong(block_ref.shard));
+  obj("seqno", td::JsonInt(block_ref.seqno));
+  obj.leave();
+
+  return jb.string_builder().as_cslice().str();
+}
+
+
+
+std::string InsertBatchPostgres::jsonify(const std::vector<schema::BlockReference>& prev_blocks) {
+  td::JsonBuilder jb;
+  auto obj = jb.enter_array();
+
+  for (auto & p : prev_blocks) {
+    obj.enter_value() << td::JsonRaw(jsonify(p));
+  }
+  obj.leave();
+  return jb.string_builder().as_cslice().str();
+}
+
+
 void InsertBatchPostgres::insert_blocks(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks) {
   std::ostringstream query;
   query << "INSERT INTO blocks (workchain, shard, seqno, root_hash, file_hash, mc_block_workchain, "
                                 "mc_block_shard, mc_block_seqno, global_id, version, after_merge, before_split, "
                                 "after_split, want_merge, want_split, key_block, vert_seqno_incr, flags, gen_utime, start_lt, "
                                 "end_lt, validator_list_hash_short, gen_catchain_seqno, min_ref_mc_seqno, "
-                                "prev_key_block_seqno, vert_seqno, master_ref_seqno, rand_seed, created_by, tx_count) VALUES ";
+                                "prev_key_block_seqno, vert_seqno, master_ref_seqno, rand_seed, created_by, tx_count, prev_blocks) VALUES ";
 
   bool is_first = true;
   for (const auto& task : insert_tasks) {
@@ -463,7 +489,8 @@ void InsertBatchPostgres::insert_blocks(pqxx::work &transaction, const std::vect
             << TO_SQL_OPTIONAL(block.master_ref_seqno) << ","
             << TO_SQL_STRING(block.rand_seed) << ","
             << TO_SQL_STRING(block.created_by) << ","
-            << block.transactions.size()
+            << block.transactions.size() << ","
+            << "'" << jsonify(block.prev_blocks) << "'"
             << ")";
     }
   }

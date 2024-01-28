@@ -221,6 +221,12 @@ struct Transaction {
   TransactionDescr description;
 };
 
+struct BlockReference {
+  int32_t workchain;
+  int64_t shard;
+  uint32_t seqno;
+};
+
 struct Block {
   int32_t workchain;
   int64_t shard;
@@ -255,6 +261,7 @@ struct Block {
   std::string created_by;
 
   std::vector<Transaction> transactions;
+  std::vector<BlockReference> prev_blocks;
 };
 
 struct MasterchainBlockShard {

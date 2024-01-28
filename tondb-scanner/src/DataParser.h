@@ -17,7 +17,7 @@ public:
 private:
   td::Status parse_impl();
 
-  schema::Block parse_block(const ton::BlockIdExt& blk_id, block::gen::Block::Record& blk, const block::gen::BlockInfo::Record& info, 
+  schema::Block parse_block(const td::Ref<vm::Cell>& root_cell, const ton::BlockIdExt& blk_id, block::gen::Block::Record& blk, const block::gen::BlockInfo::Record& info, 
                             const block::gen::BlockExtra::Record& extra, td::optional<schema::Block> &mc_block);
   schema::MasterchainBlockShard parse_shard_state(td::uint32 mc_seqno, const ton::BlockIdExt& shard_blk_id);
   td::Result<schema::Message> parse_message(td::Ref<vm::Cell> msg_cell);

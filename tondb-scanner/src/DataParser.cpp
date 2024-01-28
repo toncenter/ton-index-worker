@@ -34,7 +34,7 @@ td::Status ParseQuery::parse_impl() {
     }
 
     // block details
-    auto schema_block = parse_block(block_ds.block_data->block_id(), blk, info, extra, mc_block);
+    auto schema_block = parse_block(block_ds.block_data->root_cell(), block_ds.block_data->block_id(), blk, info, extra, mc_block);
     if (!mc_block) {
         mc_block = schema_block;
     }
@@ -63,7 +63,7 @@ schema::MasterchainBlockShard ParseQuery::parse_shard_state(td::uint32 mc_seqno,
   return {mc_seqno, shard_blk_id.id.workchain, static_cast<int64_t>(shard_blk_id.id.shard), shard_blk_id.id.seqno};
 }
 
-schema::Block ParseQuery::parse_block(const ton::BlockIdExt& blk_id, block::gen::Block::Record& blk, const block::gen::BlockInfo::Record& info, 
+schema::Block ParseQuery::parse_block(const td::Ref<vm::Cell>& root_cell, const ton::BlockIdExt& blk_id, block::gen::Block::Record& blk, const block::gen::BlockInfo::Record& info, 
                           const block::gen::BlockExtra::Record& extra, td::optional<schema::Block> &mc_block) {
   schema::Block block;
   block.workchain = blk_id.id.workchain;
@@ -106,6 +106,16 @@ schema::Block ParseQuery::parse_block(const ton::BlockIdExt& blk_id, block::gen:
   }
   block.rand_seed = td::base64_encode(extra.rand_seed.as_slice());
   block.created_by = td::base64_encode(extra.created_by.as_slice());
+
+  // prev blocks
+  std::vector<ton::BlockIdExt> prev;
+  ton::BlockIdExt mc_blkid;
+  bool after_split;
+  auto res = block::unpack_block_prev_blk_ext(root_cell, blk_id, prev, mc_blkid, after_split);
+
+  for(auto& p : prev) {
+    block.prev_blocks.push_back({p.id.workchain, static_cast<int64_t>(p.id.shard), p.id.seqno});
+  }
   return block;
 }
 

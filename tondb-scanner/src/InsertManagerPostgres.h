@@ -74,6 +74,8 @@ private:
   std::string jsonify(const schema::TrBouncePhase& bounce);
   std::string jsonify(const schema::TrComputePhase& compute);
   std::string jsonify(schema::TransactionDescr descr);
+  std::string jsonify(const schema::BlockReference& block_ref);
+  std::string jsonify(const std::vector<schema::BlockReference>& prev_blocks);
 
   void insert_blocks(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);
   void insert_shard_state(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks_);

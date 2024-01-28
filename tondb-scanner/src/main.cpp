@@ -35,9 +35,9 @@ int main(int argc, char *argv[]) {
   InsertManagerPostgres::Credential credential;
 
   std::uint32_t max_active_tasks = 7;
-  std::uint32_t max_queue_blocks = 5000;
-  std::uint32_t max_queue_txs = 500000;
-  std::uint32_t max_queue_msgs = 500000;
+  std::uint32_t max_queue_blocks = 20000;
+  std::uint32_t max_queue_txs = 10000000;
+  std::uint32_t max_queue_msgs = 10000000;
   
   std::uint32_t max_insert_actors = 12;
   std::uint32_t max_batch_blocks = 10000;
