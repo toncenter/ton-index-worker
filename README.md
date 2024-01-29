@@ -10,7 +10,10 @@ Before installing the worker, ensure the TON Index database is set up using the 
 ### 1.1. Setup as systemd daemon
 To install as a daemon use the script below: 
 
-    ./scripts/add2systemd.sh <args> [--force]
+    ./scripts/add2systemd.sh --db /var/ton-work/db --host <ip> --port <port> \
+                             --user <postgres user> --password <postgres password> --dbname <database name> \
+                             --from 1 --max-active-tasks $(nproc) --threads $(nproc) \
+                             --max-insert-actors <number of insert actors> [--force]
 
 You may find the list of arguments in section [available arguments](#13-available-arguments). Use flag `--force` to force rebuild binary. 
 
@@ -43,15 +46,7 @@ Do the following steps to build and run index worker from source.
 
         tondb-scanner <args>
 
-### 1.3. Install as systemd daemon.
-1. Run script with sudo:
-
-        ./scripts/add2systemd.sh --db /var/ton-work/db --host <ip> --port <port> \
-                                 --user <postgres user> --password <postgres password> --dbname <database name> \
-                                 --from 1 --max-active-tasks $(nproc) --threads $(nproc) \
-                                 --max-insert-actors <number of insert actors> [--force]
-
-### 1.4. Available arguments:
+### 1.3. Available arguments:
 * `--db <path>` - path to TON node directory. Pass `/var/ton-work/db`, if you have TON node installed by mytonctrl. **Required**.
 * `--host <ip>` - PostgreSQL host. Only IPv4 is acceptable. Default: `127.0.0.1`.
 * `--port <port>` - PostgreSQL port. Default: `5432`.
