@@ -28,12 +28,12 @@ Do the following steps to build and run index worker from source.
 
         mkdir -p build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=off -GNinja .
+        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=off -GNinja ..
         ninja -j$(nproc) tondb-scanner
 
 3. Install binary to your system:
 
-        sudo cp ./tondb-scanner/tondb-scanner /usr/local/bin
+        sudo cmake --install 
 
 4. Increase maximum opened files limit: 
 
@@ -43,7 +43,15 @@ Do the following steps to build and run index worker from source.
 
         tondb-scanner <args>
 
-### 1.3. Available arguments:
+### 1.3. Install as systemd daemon.
+1. Run script with sudo:
+
+        ./scripts/add2systemd.sh --db /var/ton-work/db --host <ip> --port <port> \
+                                 --user <postgres user> --password <postgres password> --dbname <database name> \
+                                 --from 1 --max-active-tasks $(nproc) --threads $(nproc) \
+                                 --max-insert-actors <number of insert actors> [--force]
+
+### 1.4. Available arguments:
 * `--db <path>` - path to TON node directory. Pass `/var/ton-work/db`, if you have TON node installed by mytonctrl. **Required**.
 * `--host <ip>` - PostgreSQL host. Only IPv4 is acceptable. Default: `127.0.0.1`.
 * `--port <port>` - PostgreSQL port. Default: `5432`.
@@ -51,7 +59,14 @@ Do the following steps to build and run index worker from source.
 * `--password <password>` - PostgreSQL password. Default: empty password.
 * `--dbname <dbname>` - PostgreSQL database name. Default: `ton_index`.
 * `--from <seqno>` - Masterchain seqno to start indexing from. Use value `1` to index the whole blockchain.
-* `--max-parallel-tasks <count>` - maximum parallel disk reading tasks. Default: `2048`.
-* `--insert-batch-size <size>` - maximum masterchain seqnos in one INSERT query. Default: `512`.
-* `--insert-parallel-actors <actors>` - maximum concurrent INSERT queries. Default: `3`.
+* `--max-active-tasks <count>` - maximum parallel disk reading tasks. Recommended value is number of CPU cores.
+* `--max-queue-blocks <size>` - maximum blocks in queue (prefetched blocks from disk).
+* `--max-queue-txs <size>` - maximum transactions in queue.
+* `--max-queue-msgs <size>` - maximum messages in queue.
+* `--max-insert-actors <actors>` - maximum concurrent INSERT queries.
+* `--max-batch-blocks <size>` - maximum blocks in batch (size of insert batch).
+* `--max-batch-txs <size>` - maximum transactions in batch.
+* `--max-batch-msgs <size>` - maximum messages in batch.
+* `--threads <threads>` - number of CPU threads.
+* `--stats-freq <seconds>` - frequency of printing a statistics.
 
