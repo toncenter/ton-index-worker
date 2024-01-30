@@ -41,6 +41,6 @@ private:
     td::int32 max_insert_msgs_{65536};
 
     bool check_batch_size(QueueStatus& batch_status);
-    void schedule_next_insert_batches();
+    void schedule_next_insert_batches(bool full_batch);
     void insert_batch_finished();
 };

@@ -21,7 +21,7 @@ void InsertManagerBase::start_up() {
 
 void InsertManagerBase::alarm() {
     alarm_timestamp() = td::Timestamp::in(1.0);
-    td::actor::send_closure(actor_id(this), &InsertManagerBase::schedule_next_insert_batches);
+    td::actor::send_closure(actor_id(this), &InsertManagerBase::schedule_next_insert_batches, false);
 }
 
 
@@ -41,9 +41,6 @@ void InsertManagerBase::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, 
     insert_queue_.push(std::move(task));
     queue_status_ += status_delta;
     queued_promise.set_result(queue_status_);
-    // // Debug
-    // queued_promise.set_result(queue_status_);
-    // inserted_promise.set_result(td::Unit());
 }
 
 
@@ -62,9 +59,12 @@ bool InsertManagerBase::check_batch_size(QueueStatus &batch_status)
     );
 }
 
-void InsertManagerBase::schedule_next_insert_batches()
+void InsertManagerBase::schedule_next_insert_batches(bool full_batch = false)
 {
     while(!insert_queue_.empty() && (parallel_insert_actors_ < max_parallel_insert_actors_)) {
+        if (check_batch_size(queue_status_) && full_batch)
+            break;
+
         std::vector<InsertTaskStruct> batch;
         QueueStatus batch_status{0, 0, 0, 0};
         while(!insert_queue_.empty() && check_batch_size(batch_status)) {
@@ -84,11 +84,15 @@ void InsertManagerBase::schedule_next_insert_batches()
         });
         
         ++parallel_insert_actors_;
+        // LOG(INFO) << "Inserting batch[mb=" << batch_status.mc_blocks_ 
+        //           << ", b=" << batch_status.blocks_ 
+        //           << ", txs=" << batch_status.txs_
+        //           << ", msgs=" << batch_status.msgs_ << "]";
         create_insert_actor(std::move(batch), std::move(P));
     }
 }
 
 void InsertManagerBase::insert_batch_finished() {
     --parallel_insert_actors_;
-    td::actor::send_closure(actor_id(this), &InsertManagerBase::schedule_next_insert_batches);
+    td::actor::send_closure(actor_id(this), &InsertManagerBase::schedule_next_insert_batches, true);
 }
