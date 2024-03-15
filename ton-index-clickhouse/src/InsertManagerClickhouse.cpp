@@ -58,21 +58,21 @@ void InsertManagerClickhouse::get_existing_seqnos(td::Promise<std::vector<std::u
     return;
 }
 
-void InsertManagerClickhouse::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueStatus> queued_promise, td::Promise<td::Unit> inserted_promise) {    
+void InsertManagerClickhouse::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueState> queued_promise, td::Promise<td::Unit> inserted_promise) {    
     auto task = InsertTaskStruct{mc_seqno, std::move(block_ds), std::move(inserted_promise)};
-    auto status_delta = task.get_queue_status();
+    auto status_delta = task.get_queue_state();
     insert_queue_.push(std::move(task));
-    queue_status_ += status_delta;
-    queued_promise.set_result(queue_status_);
+    queue_state_ += status_delta;
+    queued_promise.set_result(queue_state_);
 }
 
-bool InsertManagerClickhouse::check_batch_size(QueueStatus &batch_status)
+bool InsertManagerClickhouse::check_batch_size(QueueState &batch_state)
 {
     return (
-        (batch_status.mc_blocks_ < max_insert_mc_blocks_) &&
-        (batch_status.blocks_ < max_insert_blocks_) &&
-        (batch_status.txs_ < max_insert_txs_) &&
-        (batch_status.msgs_ < max_insert_msgs_)
+        (batch_state.mc_blocks_ < max_insert_mc_blocks_) &&
+        (batch_state.blocks_ < max_insert_blocks_) &&
+        (batch_state.txs_ < max_insert_txs_) &&
+        (batch_state.msgs_ < max_insert_msgs_)
     );
 }
 
@@ -80,14 +80,14 @@ void InsertManagerClickhouse::schedule_next_insert_batches()
 {
     while(!insert_queue_.empty() && (parallel_insert_actors_ < max_parallel_insert_actors_)) {
         std::vector<InsertTaskStruct> batch;
-        QueueStatus batch_status{0, 0, 0, 0};
-        while(!insert_queue_.empty() && check_batch_size(batch_status)) {
+        QueueState batch_state{0, 0, 0, 0};
+        while(!insert_queue_.empty() && check_batch_size(batch_state)) {
             auto task = std::move(insert_queue_.front());
             insert_queue_.pop();
 
-            QueueStatus loc_status = task.get_queue_status();
-            batch_status += loc_status;
-            queue_status_ -= loc_status;
+            QueueState loc_state = task.get_queue_state();
+            batch_state += loc_state;
+            queue_state_ -= loc_state;
             batch.push_back(std::move(task));
         }
         auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<td::Unit> R){
@@ -107,8 +107,8 @@ void InsertManagerClickhouse::insert_batch_finished() {
     td::actor::send_closure(actor_id(this), &InsertManagerClickhouse::schedule_next_insert_batches);
 }
 
-void InsertManagerClickhouse::get_insert_queue_status(td::Promise<QueueStatus> promise) {
-    promise.set_result(queue_status_);
+void InsertManagerClickhouse::get_insert_queue_state(td::Promise<QueueState> promise) {
+    promise.set_result(queue_state_);
 }
 
 void InsertManagerClickhouse::upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) {
@@ -214,8 +214,8 @@ void InsertBatchClickhouse::insert_blocks(clickhouse::Client &client){
     stop();
 }
 
-QueueStatus InsertTaskStruct::get_queue_status() {
-    QueueStatus status = {1, parsed_block_->blocks_.size(), 0, 0};
+QueueState InsertTaskStruct::get_queue_state() {
+    QueueState status = {1, parsed_block_->blocks_.size(), 0, 0};
     for(const auto& blk : parsed_block_->blocks_) {
         status.txs_ += blk.transactions.size();
         for(const auto& tx : blk.transactions) {

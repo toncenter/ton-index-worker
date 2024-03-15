@@ -45,11 +45,11 @@ void IndexScheduler::alarm() {
         next_print_stats_ = td::Timestamp::in(stats_timeout_);
     }
 
-    auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueStatus> R){
+    auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueState> R){
         R.ensure();
-        td::actor::send_closure(SelfId, &IndexScheduler::got_insert_queue_status, R.move_as_ok());
+        td::actor::send_closure(SelfId, &IndexScheduler::got_insert_queue_state, R.move_as_ok());
     });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_insert_queue_status, std::move(Q));
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_insert_queue_state, std::move(Q));
 
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<int> R){
         if (R.is_error()) {
@@ -118,7 +118,7 @@ void IndexScheduler::reschedule_seqno(std::uint32_t mc_seqno) {
     processing_seqnos_.erase(mc_seqno);
     queued_seqnos_.push(mc_seqno);
 
-    td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
+    // td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
 }
 
 void IndexScheduler::seqno_fetched(std::uint32_t mc_seqno, MasterchainBlockDataState block_data_state) {
@@ -160,7 +160,7 @@ void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBl
         }
         td::actor::send_closure(SelfId, &IndexScheduler::seqno_inserted, mc_seqno, R.move_as_ok());
     });
-    auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<QueueStatus> R){
+    auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<QueueState> R){
         R.ensure();
         td::actor::send_closure(SelfId, &IndexScheduler::seqno_queued_to_insert, mc_seqno, R.move_as_ok());
     });
@@ -172,23 +172,22 @@ void IndexScheduler::print_stats() {
     LOG(INFO) << "Last: " << last_indexed_seqno_ << " / " << last_known_seqno_ 
               << "\tBlk/s: " << avg_tps_
               << "\tETA: " << get_time_string(eta)
-              << "\tQ[" << cur_queue_status_.mc_blocks_ << "M, " 
-              << cur_queue_status_.blocks_ << "b, " 
-              << cur_queue_status_.txs_ << "t, " 
-              << cur_queue_status_.msgs_ << "m]";
+              << "\tQ[" << cur_queue_state_.mc_blocks_ << "M, " 
+              << cur_queue_state_.blocks_ << "b, " 
+              << cur_queue_state_.txs_ << "t, " 
+              << cur_queue_state_.msgs_ << "m]";
 }
 
-void IndexScheduler::seqno_queued_to_insert(std::uint32_t mc_seqno, QueueStatus status) {
+void IndexScheduler::seqno_queued_to_insert(std::uint32_t mc_seqno, QueueState status) {
     LOG(DEBUG) << "Seqno queued to insert " << mc_seqno;
 
     processing_seqnos_.erase(mc_seqno);
-    got_insert_queue_status(status);
+    got_insert_queue_state(status);
 }
 
-void IndexScheduler::got_insert_queue_status(QueueStatus status) {
-    cur_queue_status_ = status;
-    bool accept_blocks = (status.mc_blocks_ < max_queue_mc_blocks_) && (status.blocks_ < max_queue_blocks_) && \
-        (status.txs_ < max_queue_txs_) && (status.msgs_ < max_queue_msgs_);
+void IndexScheduler::got_insert_queue_state(QueueState status) {
+    cur_queue_state_ = status;
+    bool accept_blocks = status < max_queue_;
     if (accept_blocks) {
         td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
     }
@@ -207,5 +206,10 @@ void IndexScheduler::schedule_next_seqnos() {
         std::uint32_t seqno = queued_seqnos_.front();
         queued_seqnos_.pop();
         schedule_seqno(seqno);
+    }
+    if(out_of_sync_ && queued_seqnos_.size() < 100) {
+        LOG(INFO) << "Syncronization complete!";
+        out_of_sync_ = false;
+        td::actor::send_closure(db_scanner_, &DbScanner::set_out_of_sync, false);
     }
 }
