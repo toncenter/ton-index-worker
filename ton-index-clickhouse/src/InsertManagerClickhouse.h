@@ -25,8 +25,8 @@ public:
     void alarm() override;
 
     void get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) override;
-    void insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueStatus> queued_promise, td::Promise<td::Unit> inserted_promise) override;
-    void get_insert_queue_status(td::Promise<QueueStatus> promise) override;
+    void insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueState> queued_promise, td::Promise<td::Unit> inserted_promise) override;
+    void get_insert_queue_state(td::Promise<QueueState> promise) override;
     
     void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) override;
     void upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) override;
@@ -36,7 +36,7 @@ private:
     Credential credential_;
 
     std::queue<InsertTaskStruct> insert_queue_;
-    QueueStatus queue_status_{0, 0, 0, 0};
+    QueueState queue_state_{0, 0, 0, 0};
 
     td::int32 batch_blocks_count_{512};
     td::int32 max_parallel_insert_actors_{32};
@@ -50,7 +50,7 @@ private:
     
     clickhouse::ClientOptions get_clickhouse_options();
 
-    bool check_batch_size(QueueStatus& batch_status);
+    bool check_batch_size(QueueState& batch_state);
     void schedule_next_insert_batches();
     void insert_batch_finished();
 };

@@ -14,6 +14,7 @@ private:
   std::string db_root_;
   ton::BlockSeqno last_known_seqno_{0};
   td::int32 max_db_cache_size_{256};
+  bool out_of_sync_ = true;
   std::atomic<td::uint32> active_fetches;
 
   td::actor::ActorOwn<ton::validator::ValidatorManagerInterface> validator_manager_;
@@ -23,18 +24,18 @@ public:
   DbScanner(std::string db_root, td::uint32 last_known_seqno, td::int32 max_db_cache_size = 256) 
     : db_root_(db_root), last_known_seqno_(last_known_seqno), max_db_cache_size_(max_db_cache_size) {}
 
-  ton::BlockSeqno get_last_known_seqno() {
-    return last_known_seqno_;
-  }
+  ton::BlockSeqno get_last_known_seqno() { return last_known_seqno_; }
 
   void start_up() override;
   void alarm() override;
 
   void fetch_seqno(std::uint32_t mc_seqno, td::Promise<MasterchainBlockDataState> promise);
+  void set_out_of_sync(bool value);
   void get_last_mc_seqno(td::Promise<std::int32_t> promise);
+  void catch_up_with_primary();  // DEBUG
 private:
   void set_last_mc_seqno(ton::BlockSeqno mc_seqno);
-  void catch_up_with_primary();
+  // void catch_up_with_primary();
   void update_last_mc_seqno();
 };
 
