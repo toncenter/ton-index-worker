@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 add_executable(ton-index-clickhouse 
     src/main.cpp
-    # src/InsertManagerClickhouse.cpp
+    src/InsertManagerClickhouse.cpp
     src/IndexScheduler.cpp
 )
 

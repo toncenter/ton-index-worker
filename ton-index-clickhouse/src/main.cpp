@@ -6,7 +6,7 @@
 
 #include "crypto/vm/cp0.h"
 
-// #include "InsertManagerClickhouse.h"
+#include "InsertManagerClickhouse.h"
 #include "DataParser.h"
 #include "DbScanner.h"
 #include "EventProcessor.h"
@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
 
   td::actor::ActorOwn<DbScanner> db_scanner_;
   td::actor::ActorOwn<ParseManager> parse_manager_;
-  // td::actor::ActorOwn<InsertManagerClickhouse> insert_manager_;
+  td::actor::ActorOwn<InsertManagerClickhouse> insert_manager_;
   td::actor::ActorOwn<IndexScheduler> index_scheduler_;
 
   // options
@@ -31,7 +31,7 @@ int main(int argc, char *argv[]) {
   td::uint32 last_known_seqno = 0;
   td::int32 max_db_cache_size = 1024;
 
-  // InsertManagerClickhouse::Credential credential;
+  InsertManagerClickhouse::Credential credential;
 
   std::uint32_t max_active_tasks = 7;
   std::uint32_t max_insert_actors = 12;
@@ -51,30 +51,30 @@ int main(int argc, char *argv[]) {
   p.add_option('D', "db", "Path to TON DB folder", [&](td::Slice fname) { 
     db_root = fname.str();
   });
-  // p.add_option('h', "host", "PostgreSQL host address",  [&](td::Slice value) { 
-  //   credential.host = value.str();
-  // });
-  // p.add_checked_option('p', "port", "PostgreSQL port", [&](td::Slice value) {
-  //   int port;
-  //   try{
-  //     port = std::stoi(value.str());
-  //     if (!(port >= 0 && port < 65536))
-  //       return td::Status::Error("Port must be a number between 0 and 65535");
-  //   } catch(...) {
-  //     return td::Status::Error(ton::ErrorCode::error, "bad value for --port: not a number");
-  //   }
-  //   credential.port = port;
-  //   return td::Status::OK();
-  // });
-  // p.add_option('u', "user", "PostgreSQL username", [&](td::Slice value) { 
-  //   credential.user = value.str();
-  // });
-  // p.add_option('P', "password", "PostgreSQL password", [&](td::Slice value) { 
-  //   credential.password = value.str();
-  // });
-  // p.add_option('d', "dbname", "PostgreSQL database name", [&](td::Slice value) { 
-  //   credential.dbname = value.str();
-  // });
+  p.add_option('h', "host", "Clickhouse host address",  [&](td::Slice value) { 
+    credential.host = value.str();
+  });
+  p.add_checked_option('p', "port", "Clickhouse port", [&](td::Slice value) {
+    int port;
+    try{
+      port = std::stoi(value.str());
+      if (!(port >= 0 && port < 65536))
+        return td::Status::Error("Port must be a number between 0 and 65535");
+    } catch(...) {
+      return td::Status::Error(ton::ErrorCode::error, "bad value for --port: not a number");
+    }
+    credential.port = port;
+    return td::Status::OK();
+  });
+  p.add_option('u', "user", "Clickhouse username", [&](td::Slice value) { 
+    credential.user = value.str();
+  });
+  p.add_option('P', "password", "Clickhouse password", [&](td::Slice value) { 
+    credential.password = value.str();
+  });
+  p.add_option('d', "dbname", "Clickhouse database name", [&](td::Slice value) { 
+    credential.dbname = value.str();
+  });
   p.add_checked_option('f', "from", "Masterchain seqno to start indexing from", [&](td::Slice fname) { 
     int v;
     try {
@@ -200,21 +200,21 @@ int main(int argc, char *argv[]) {
   }
 
   td::actor::Scheduler scheduler({threads});
-  // scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential); });
+  scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerClickhouse>("insertmanager", credential); });
   scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
   scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, last_known_seqno, max_db_cache_size); });
 
   scheduler.run_in_context([&] { 
-    // index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-    //   insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout); 
     index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-      td::actor::ActorId<InsertManagerInterface>(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout); 
+      insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout); 
+    // index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
+    //   td::actor::ActorId<InsertManagerInterface>(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout); 
   });
-  // scheduler.run_in_context([&] { 
-  //   td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_parallel_inserts_actors, max_insert_actors);
-  //   td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_insert_batch_size, batch_size);
-  //   td::actor::send_closure(insert_manager_, &InsertManagerPostgres::print_info);
-  // });
+  scheduler.run_in_context([&] { 
+    td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::set_parallel_inserts_actors, max_insert_actors);
+    td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::set_insert_batch_size, batch_size);
+    td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::print_info);
+  });
   scheduler.run_in_context([&] { td::actor::send_closure(index_scheduler_, &IndexScheduler::run); });
   
   while(scheduler.run(1)) {
