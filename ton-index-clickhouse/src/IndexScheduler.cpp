@@ -51,11 +51,11 @@ void IndexScheduler::alarm() {
     //     next_catch_up_ = td::Timestamp::in((out_of_sync_? 30.0 : 1.0));
     // }
 
-    // auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueState> R){
-    //     R.ensure();
-    //     td::actor::send_closure(SelfId, &IndexScheduler::got_insert_queue_state, R.move_as_ok());
-    // });
-    // td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_insert_queue_state, std::move(Q));
+    auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueState> R){
+        R.ensure();
+        td::actor::send_closure(SelfId, &IndexScheduler::got_insert_queue_state, R.move_as_ok());
+    });
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_insert_queue_state, std::move(Q));
 
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<int> R){
         if (R.is_error()) {
@@ -65,16 +65,13 @@ void IndexScheduler::alarm() {
         td::actor::send_closure(SelfId, &IndexScheduler::got_last_known_seqno, R.move_as_ok());
     });
     td::actor::send_closure(db_scanner_, &DbScanner::get_last_known_seqno, std::move(P));
-    td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
 }
 
 void IndexScheduler::run() {
-    // auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<std::vector<std::uint32_t>> R) {
-    //     td::actor::send_closure(SelfId, &IndexScheduler::got_existing_seqnos, std::move(R));
-    // });
-    // td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P));
-
-    alarm_timestamp() = td::Timestamp::in(1.0);
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<std::vector<std::uint32_t>> R) {
+        td::actor::send_closure(SelfId, &IndexScheduler::got_existing_seqnos, std::move(R));
+    });
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P));
 }
 
 void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> R) {

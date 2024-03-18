@@ -37,7 +37,8 @@ int main(int argc, char *argv[]) {
   std::uint32_t max_insert_actors = 12;
   
   QueueState max_queue{200000, 200000, 1000000, 1000000};
-  QueueState batch_size{2000, 2000, 10000, 10000};
+  QueueState batch_size{10000, 10000, 10000, 10000};
+  // QueueState batch_size{200000, 200000, 1000000, 1000000};
   
   td::OptionParser p;
   p.set_description("Parse TON DB and insert data into Postgres");
