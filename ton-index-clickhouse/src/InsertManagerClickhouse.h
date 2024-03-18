@@ -48,17 +48,15 @@ private:
   std::vector<InsertTaskStruct> insert_tasks_;
   td::Promise<td::Unit> promise_;
 
-  struct TxMsg {
-    std::string tx_hash;
-    std::string msg_hash;
-    std::string direction; // in or out
-  };
-
   struct MsgBody {
     td::Bits256 hash;
     std::string body;
   };
-  // void insert_blocks(clickhouse::Client& client, const std::vector<InsertTaskStruct>& insert_tasks_);
+
+  void insert_transactions(clickhouse::Client& client);
+  void insert_messages(clickhouse::Client& client);
+  void insert_account_states(clickhouse::Client& client);
+  void insert_blocks(clickhouse::Client& client);
   // void insert_shard_state(clickhouse::Client& client, const std::vector<InsertTaskStruct>& insert_tasks_);
   // void insert_transactions(clickhouse::Client& client, const std::vector<InsertTaskStruct>& insert_tasks_);
   // void insert_messsages(clickhouse::Client& client, const std::vector<schema::Message> &messages, const std::vector<MsgBody>& msg_bodies, const std::vector<TxMsg> &tx_msgs);
