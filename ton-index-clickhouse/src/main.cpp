@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
   // QueueState batch_size{200000, 200000, 1000000, 1000000};
   
   td::OptionParser p;
-  p.set_description("Parse TON DB and insert data into Postgres");
+  p.set_description("Parse TON DB and insert data into Clickhouse");
   p.add_option('\0', "help", "prints_help", [&]() {
     char b[10240];
     td::StringBuilder sb(td::MutableSlice{b, 10000});
@@ -189,7 +189,7 @@ int main(int argc, char *argv[]) {
     try {
       v = std::stoi(fname.str());
     } catch (...) {
-      return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: not a number");
+      return td::Status::Error(ton::ErrorCode::error, "bad value for --stats-freq: not a number");
     }
     stats_timeout = v;
     return td::Status::OK();
@@ -203,13 +203,11 @@ int main(int argc, char *argv[]) {
   td::actor::Scheduler scheduler({threads});
   scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerClickhouse>("insertmanager", credential); });
   scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
-  scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, last_known_seqno, max_db_cache_size); });
+  scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary, max_db_cache_size); });
 
   scheduler.run_in_context([&] { 
     index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-      insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout); 
-    // index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-    //   td::actor::ActorId<InsertManagerInterface>(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout); 
+      insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout);
   });
   scheduler.run_in_context([&] { 
     td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::set_parallel_inserts_actors, max_insert_actors);

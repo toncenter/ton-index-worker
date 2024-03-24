@@ -17,7 +17,6 @@ private:
   ScannerMode mode_;
   td::int32 max_db_cache_size_{256};
   bool out_of_sync_ = true;
-  std::atomic<td::uint32> active_fetches;
   ton::BlockSeqno last_known_seqno_;
 
   td::actor::ActorOwn<ton::validator::ValidatorManagerInterface> validator_manager_;
@@ -36,11 +35,12 @@ public:
   void get_last_mc_seqno(td::Promise<ton::BlockSeqno> promise);
   void get_oldest_mc_seqno(td::Promise<ton::BlockSeqno> promise);
   void get_mc_block_handle(ton::BlockSeqno seqno, td::Promise<ton::validator::ConstBlockHandle> promise);
-  void set_out_of_sync(bool value);
-  void catch_up_with_primary();  // DEBUG
+  void set_out_of_sync(bool value) {
+    out_of_sync_ = value;
+  }
 private:
   void set_last_mc_seqno(ton::BlockSeqno mc_seqno);
-  // void catch_up_with_primary();
+  void catch_up_with_primary();
   void update_last_mc_seqno();
 };
 
