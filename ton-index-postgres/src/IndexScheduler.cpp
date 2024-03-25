@@ -175,7 +175,8 @@ void IndexScheduler::print_stats() {
               << "\tQ[" << cur_queue_state_.mc_blocks_ << "M, " 
               << cur_queue_state_.blocks_ << "b, " 
               << cur_queue_state_.txs_ << "t, " 
-              << cur_queue_state_.msgs_ << "m]";
+              << cur_queue_state_.msgs_ << "m]"
+              << "\tOut of sync: " << out_of_sync_;
 }
 
 void IndexScheduler::seqno_queued_to_insert(std::uint32_t mc_seqno, QueueState status) {
@@ -207,9 +208,17 @@ void IndexScheduler::schedule_next_seqnos() {
         queued_seqnos_.pop();
         schedule_seqno(seqno);
     }
-    if(out_of_sync_ && queued_seqnos_.size() < 100) {
+    if(!out_of_sync_ && last_known_seqno_ - last_indexed_seqno_ > 100) {
+        LOG(INFO) << "Syncronization lost!";
+        out_of_sync_ = true;
+        td::actor::send_closure(db_scanner_, &DbScanner::set_out_of_sync, out_of_sync_);
+    }
+    if(out_of_sync_ && last_known_seqno_ - last_indexed_seqno_ < 100) {
         LOG(INFO) << "Syncronization complete!";
         out_of_sync_ = false;
-        td::actor::send_closure(db_scanner_, &DbScanner::set_out_of_sync, false);
+        td::actor::send_closure(db_scanner_, &DbScanner::set_out_of_sync, out_of_sync_);
+    }
+    if(!queued_seqnos_.empty()) { 
+        td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
     }
 }

@@ -101,6 +101,8 @@ void IndexScheduler::got_last_known_seqno(std::uint32_t last_known_seqno) {
         LOG(INFO) << "Skipped " << skipped_count_ << " existing seqnos";
     }
     last_known_seqno_ = last_known_seqno;
+
+    td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
 }
 
 void IndexScheduler::schedule_seqno(std::uint32_t mc_seqno) {
@@ -225,5 +227,6 @@ void IndexScheduler::print_stats() {
               << "\tQ[" << cur_queue_state_.mc_blocks_ << "M, " 
               << cur_queue_state_.blocks_ << "b, " 
               << cur_queue_state_.txs_ << "t, " 
-              << cur_queue_state_.msgs_ << "m]";
+              << cur_queue_state_.msgs_ << "m]"
+              << "\tOut of sync: " << out_of_sync_;
 }

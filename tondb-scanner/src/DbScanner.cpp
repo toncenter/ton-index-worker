@@ -406,18 +406,20 @@ public:
 //
 void DbScanner::start_up() {
   alarm_timestamp() = td::Timestamp::in(1.0);
-  auto opts = ton::validator::ValidatorManagerOptions::create(
-        ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()},
-        ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()});
-  db_ = td::actor::create_actor<ton::validator::RootDb>("db", td::actor::ActorId<ton::validator::ValidatorManager>(), db_root_, std::move(opts), td::DbOpenMode::db_secondary);
+  // auto opts = ton::validator::ValidatorManagerOptions::create(
+  //       ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()},
+  //       ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()});
+  // db_ = td::actor::create_actor<ton::validator::RootDb>("db", td::actor::ActorId<ton::validator::ValidatorManager>(), db_root_, std::move(opts), td::DbOpenMode::db_secondary);
+  db_ = td::actor::create_actor<ton::validator::RootDb>("db", td::actor::ActorId<ton::validator::ValidatorManager>(), db_root_, true);
   db_caching_ = td::actor::create_actor<DbCacheWrapper>("cache_db", db_.get(), max_db_cache_size_);
   td::actor::send_closure(actor_id(this), &DbScanner::catch_up_with_primary);
 }
 
 void DbScanner::update_last_mc_seqno() {
-  auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<ton::BlockSeqno> R) {
+  auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<int> R) {
     R.ensure();
-    td::actor::send_closure(SelfId, &DbScanner::set_last_mc_seqno, R.move_as_ok());
+    // td::actor::send_closure(SelfId, &DbScanner::set_last_mc_seqno, R.move_as_ok());
+    td::actor::send_closure(SelfId, &DbScanner::set_last_mc_seqno, static_cast<ton::BlockSeqno>(R.move_as_ok()));
   });
   td::actor::send_closure(db_, &RootDb::get_max_masterchain_seqno, std::move(P));
 }
