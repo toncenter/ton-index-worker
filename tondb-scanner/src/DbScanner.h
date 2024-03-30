@@ -17,13 +17,14 @@ private:
   ScannerMode mode_;
   td::int32 max_db_cache_size_{256};
   bool out_of_sync_ = true;
-  ton::BlockSeqno last_known_seqno_;
+  bool is_ready_ = false;
+  ton::BlockSeqno last_known_seqno_{0};
 
   td::actor::ActorOwn<ton::validator::ValidatorManagerInterface> validator_manager_;
   td::actor::ActorOwn<ton::validator::RootDb> db_;
   td::actor::ActorOwn<DbCacheWrapper> db_caching_;
 public:
-  DbScanner(std::string db_root, ScannerMode mode, td::int32 max_db_cache_size = 256) 
+  DbScanner(std::string db_root, ScannerMode mode, td::int32 max_db_cache_size = 50000) 
     : db_root_(db_root), mode_(mode), max_db_cache_size_(max_db_cache_size) {}
 
   ton::BlockSeqno get_last_known_seqno() { return last_known_seqno_; }
@@ -63,6 +64,11 @@ private:
 
   size_t max_cache_size_;
 
+  size_t total_data_{0};
+  size_t miss_data_{0};
+
+  size_t total_state_{0};
+  size_t miss_state_{0};
 public:
   DbCacheWrapper(td::actor::ActorId<ton::validator::RootDb> db, size_t max_cache_size)
     : db_(db), max_cache_size_(max_cache_size) {
@@ -72,4 +78,6 @@ public:
   void got_block_data(ton::validator::ConstBlockHandle handle, td::Result<td::Ref<ton::validator::BlockData>> res);
   void get_block_state(ton::validator::ConstBlockHandle handle, td::Promise<td::Ref<ton::validator::ShardState>> promise);
   void got_block_state(ton::validator::ConstBlockHandle handle, td::Result<td::Ref<ton::validator::ShardState>> res);
+
+  void print_stats();
 };

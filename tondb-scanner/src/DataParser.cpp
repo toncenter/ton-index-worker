@@ -147,6 +147,8 @@ td::Result<schema::Message> ParseQuery::parse_message(td::Ref<vm::Cell> msg_cell
     msg.opcode = body->prefetch_long(32);
   }
 
+  // TODO: add message decoding
+
   td::Ref<vm::Cell> init_state_cell;
   auto& init_state_cs = message.init.write();
   if (init_state_cs.fetch_ulong(1) == 1) {
@@ -598,6 +600,8 @@ td::Result<std::vector<schema::Transaction>> ParseQuery::parse_transactions(cons
 }
 
 td::Status ParseQuery::parse_account_states(const td::Ref<ShardState>& block_state, std::set<td::Bits256> &addresses) {
+  // TODO: add account_friendly
+
   auto root = block_state->root_cell();
   block::gen::ShardStateUnsplit::Record sstate;
   if (!tlb::unpack_cell(root, sstate)) {

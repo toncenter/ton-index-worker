@@ -6,7 +6,20 @@
 using namespace ton::validator;
 
 void DbCacheWrapper::get_block_data(ConstBlockHandle handle, td::Promise<td::Ref<BlockData>> promise) {
+  // DEBUG:
+  auto cache_miss_callback = [this, SelfId = actor_id(this), handle, P = std::move(promise)](td::Result<td::Ref<BlockData>> res) mutable {
+    if(res.is_error()){
+      LOG(INFO) << "Block not found: " << handle.get()->id().to_str();
+      P.set_error(td::Status::Error("Block not found"));
+      return;
+    }
+    P.set_result(res.move_as_ok());
+  };
+  td::actor::send_closure(db_, &RootDb::get_block_data, handle, std::move(cache_miss_callback));
+  return;
+
   auto it = block_data_cache_.find(handle->id());
+  total_data_ += 1;
   if (it != block_data_cache_.end()) {
     auto res = it->second;
     promise.set_value(std::move(res)); // Cache hit
@@ -14,6 +27,7 @@ void DbCacheWrapper::get_block_data(ConstBlockHandle handle, td::Promise<td::Ref
     block_data_cache_order_.remove(handle->id());
     block_data_cache_order_.push_back(handle->id());
   } else {
+    miss_data_ += 1;
     // Check if there are pending requests for this block
     auto pending_it = block_data_pending_requests_.find(handle->id());
     if (pending_it != block_data_pending_requests_.end()) {
@@ -55,7 +69,18 @@ void DbCacheWrapper::got_block_data(ConstBlockHandle handle, td::Result<td::Ref<
 }
 
 void DbCacheWrapper::get_block_state(ConstBlockHandle handle, td::Promise<td::Ref<ShardState>> promise) {
+  // DEBUG:
+  auto cache_miss_callback = [this, SelfId = actor_id(this), handle, P = std::move(promise)](td::Result<td::Ref<ShardState>> res) mutable {
+    if(res.is_error()){
+      P.set_error(td::Status::Error("Block not found"));
+    }
+    P.set_result(res.move_as_ok());
+  };
+  td::actor::send_closure(db_, &RootDb::get_block_state, handle, std::move(cache_miss_callback));
+  return;
+
   auto it = block_state_cache_.find(handle->id());
+  total_state_ += 1;
   if (it != block_state_cache_.end()) {
     auto res = it->second;
     promise.set_value(std::move(res)); // Cache hit
@@ -63,6 +88,7 @@ void DbCacheWrapper::get_block_state(ConstBlockHandle handle, td::Promise<td::Re
     block_state_cache_order_.remove(handle->id());
     block_state_cache_order_.push_back(handle->id());
   } else {
+    miss_state_ += 1;
     // Check if there are pending requests for this block
     auto pending_it = block_state_pending_requests_.find(handle->id());
     if (pending_it != block_state_pending_requests_.end()) {
@@ -81,6 +107,8 @@ void DbCacheWrapper::get_block_state(ConstBlockHandle handle, td::Promise<td::Re
 }
 
 void DbCacheWrapper::got_block_state(ConstBlockHandle handle, td::Result<td::Ref<ShardState>> res) {
+
+
   if (res.is_ok()) {
     // Check if the cache is full
     if (block_state_cache_.size() >= max_cache_size_) {
@@ -101,6 +129,11 @@ void DbCacheWrapper::got_block_state(ConstBlockHandle handle, td::Result<td::Ref
     }
     block_state_pending_requests_.erase(handle->id());
   }
+}
+
+void DbCacheWrapper::print_stats() {
+  LOG(INFO) << "Data misses: " << miss_data_ << " / " << total_data_ << "(" << double(miss_data_) / total_data_ << "%). "
+            << "State misses: " << miss_state_ << " / " << total_state_ << "(" << double(miss_state_) / total_state_ << "%). ";
 }
 
 class GetBlockDataState: public td::actor::Actor {
@@ -425,10 +458,10 @@ void DbScanner::update_last_mc_seqno() {
 }
 
 void DbScanner::set_last_mc_seqno(ton::BlockSeqno mc_seqno) {
-  if (mc_seqno > last_known_seqno_) {
+  if (mc_seqno > this->last_known_seqno_) {
     LOG(DEBUG) << "New masterchain seqno: " << mc_seqno;
   }
-  last_known_seqno_ = mc_seqno;
+  this->last_known_seqno_ = mc_seqno;
 }
 
 void DbScanner::get_last_mc_seqno(td::Promise<ton::BlockSeqno> promise) {
@@ -444,8 +477,9 @@ void DbScanner::get_mc_block_handle(ton::BlockSeqno seqno, td::Promise<ton::vali
 }
 
 void DbScanner::catch_up_with_primary() {
-  auto R = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<td::Unit> R) {
+  auto R = td::PromiseCreator::lambda([SelfId = actor_id(this), this](td::Result<td::Unit> R) {
     R.ensure();
+    this->is_ready_ = true;
   });
   td::actor::send_closure(db_, &RootDb::try_catch_up_with_primary, std::move(R));
 }
@@ -462,9 +496,11 @@ void DbScanner::alarm() {
   if (db_.empty()) {
     return;
   }
-  td::actor::send_closure(actor_id(this), &DbScanner::update_last_mc_seqno);
+
+  // td::actor::send_closure(db_caching_, &DbCacheWrapper::print_stats);
 
   if (!out_of_sync_) {
+    td::actor::send_closure(actor_id(this), &DbScanner::update_last_mc_seqno);
     td::actor::send_closure(actor_id(this), &DbScanner::catch_up_with_primary);
   }
 }

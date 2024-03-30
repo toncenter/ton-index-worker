@@ -197,6 +197,8 @@ struct Message {
 
   td::Ref<vm::Cell> init_state;
   td::optional<std::string> init_state_boc;
+
+  td::optional<std::string> decoded_text;
 };
 
 struct Transaction {
@@ -275,6 +277,7 @@ struct MasterchainBlockShard {
 struct AccountState {
   td::Bits256 hash;           // Note: hash is not unique in case account_status is "nonexist"
   block::StdAddress account;
+  std::string account_friendly;  // TODO: add account friendly
   uint32_t timestamp;
   uint64_t balance;
   std::string account_status; // "uninit", "frozen", "active", "nonexist"
