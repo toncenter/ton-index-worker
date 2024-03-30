@@ -317,6 +317,7 @@ struct JettonWalletData {
 
 struct JettonTransfer {
   td::Bits256 transaction_hash;
+  uint64_t transaction_lt;
   uint64_t query_id;
   td::RefInt256 amount;
   std::string source;
@@ -330,6 +331,7 @@ struct JettonTransfer {
 
 struct JettonBurn {
   td::Bits256 transaction_hash;
+  uint64_t transaction_lt;
   uint64_t query_id;
   std::string owner;
   std::string jetton_wallet;
@@ -364,6 +366,7 @@ struct NFTItemData {
 
 struct NFTTransfer {
   td::Bits256 transaction_hash;
+  uint64_t transaction_lt;
   uint64_t query_id;
   block::StdAddress nft_item;
   std::string old_owner;
