@@ -480,6 +480,7 @@ public:
 
     JettonTransfer transfer;
     transfer.transaction_hash = transaction.hash;
+    transfer.transaction_lt = transaction.lt;
     transfer.query_id = transfer_record.query_id;
     transfer.amount = block::tlb::t_VarUInteger_16.as_integer(transfer_record.amount);
     if (transfer.amount.is_null()) {
@@ -541,6 +542,7 @@ public:
 
     JettonBurn burn;
     burn.transaction_hash = transaction.hash;
+    burn.transaction_lt = transaction.lt;
     burn.query_id = burn_record.query_id;
     if (!transaction.in_msg || !transaction.in_msg->source) {
       promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSING_ERROR, "Failed to unpack burn source"));
@@ -807,6 +809,7 @@ public:
 
     NFTTransfer transfer;
     transfer.transaction_hash = transaction.hash;
+    transfer.transaction_lt = transaction.lt;
     transfer.query_id = transfer_record.query_id;
     transfer.nft_item = transaction.account;
     if (!transaction.in_msg.has_value() || !transaction.in_msg.value().source) {
