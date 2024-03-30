@@ -291,10 +291,10 @@ void DbScanner::update_last_mc_seqno() {
 }
 
 void DbScanner::set_last_mc_seqno(ton::BlockSeqno mc_seqno) {
-  if (mc_seqno > last_known_seqno_) {
+  if (mc_seqno > this->last_known_seqno_) {
     LOG(DEBUG) << "New masterchain seqno: " << mc_seqno;
   }
-  last_known_seqno_ = mc_seqno;
+  this->last_known_seqno_ = mc_seqno;
 }
 
 void DbScanner::get_last_mc_seqno(td::Promise<ton::BlockSeqno> promise) {
@@ -310,8 +310,9 @@ void DbScanner::get_mc_block_handle(ton::BlockSeqno seqno, td::Promise<ton::vali
 }
 
 void DbScanner::catch_up_with_primary() {
-  auto R = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<td::Unit> R) {
+  auto R = td::PromiseCreator::lambda([SelfId = actor_id(this), this](td::Result<td::Unit> R) {
     R.ensure();
+    this->is_ready_ = true;
   });
   td::actor::send_closure(db_, &RootDb::try_catch_up_with_primary, std::move(R));
 }
@@ -328,9 +329,11 @@ void DbScanner::alarm() {
   if (db_.empty()) {
     return;
   }
-  td::actor::send_closure(actor_id(this), &DbScanner::update_last_mc_seqno);
+
+  // td::actor::send_closure(db_caching_, &DbCacheWrapper::print_stats);
 
   if (!out_of_sync_) {
+    td::actor::send_closure(actor_id(this), &DbScanner::update_last_mc_seqno);
     td::actor::send_closure(actor_id(this), &DbScanner::catch_up_with_primary);
   }
 }

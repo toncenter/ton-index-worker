@@ -152,6 +152,8 @@ td::Result<schema::Message> ParseQuery::parse_message(td::Ref<vm::Cell> msg_cell
     msg.opcode = body->prefetch_long(32);
   }
 
+  // TODO: add message decoding
+
   td::Ref<vm::Cell> init_state_cell;
   auto& init_state_cs = message.init.write();
   if (init_state_cs.fetch_ulong(1) == 1) {
