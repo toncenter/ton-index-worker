@@ -275,6 +275,7 @@ void DbScanner::start_up() {
   auto opts = ton::validator::ValidatorManagerOptions::create(
         ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()},
         ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()});
+  opts.write().set_max_open_archive_files(100);
   auto mode = mode_ == dbs_readonly ? td::DbOpenMode::db_readonly : td::DbOpenMode::db_secondary;
   db_ = td::actor::create_actor<ton::validator::RootDb>("db", td::actor::ActorId<ton::validator::ValidatorManager>(), db_root_, std::move(opts), mode);
 

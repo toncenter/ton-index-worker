@@ -76,17 +76,18 @@ void InsertBatchPostgres::start_up() {
     }
 
     // update account states
+    pqxx::work txn(c);
+    insert_blocks(txn);
+    insert_shard_state(txn);
+    insert_transactions(txn);
+    insert_messages(txn);
+    insert_account_states(txn);
+    insert_jetton_transfers(txn);
+    insert_jetton_burns(txn);
+    insert_nft_transfers(txn);
+
     {
       std::lock_guard<std::mutex> guard(latest_account_states_update_mutex);
-      pqxx::work txn(c);
-      insert_blocks(txn);
-      insert_shard_state(txn);
-      insert_transactions(txn);
-      insert_messages(txn);
-      insert_account_states(txn);
-      insert_jetton_transfers(txn);
-      insert_jetton_burns(txn);
-      insert_nft_transfers(txn);
       insert_latest_account_states(txn);
       txn.commit();
     }
@@ -463,6 +464,7 @@ void InsertBatchPostgres::insert_blocks(pqxx::work &txn) {
   query << " ON CONFLICT DO NOTHING";
 
   LOG(DEBUG) << "Running SQL query: " << query.str();
+  // LOG(INFO) << "Blocks query size: " << double(query.str().length()) / 1024 / 1024;
   txn.exec0(query.str());
 }
 
@@ -821,12 +823,8 @@ void InsertBatchPostgres::insert_transactions(pqxx::work &txn) {
     return;
   }
   query << " ON CONFLICT DO NOTHING";
-  try {
-    txn.exec0(query.str());
-  } catch (const std::exception& exc) {
-    LOG(ERROR) << "Failed to run SQL query: " << query.str() << " Error: " << exc.what();
-    std::_Exit(1);
-  }
+  // LOG(INFO) << "Transactions query size: " << double(query.str().length()) / 1024 / 1024;
+  txn.exec0(query.str());
 }
 
 
@@ -900,12 +898,8 @@ void InsertBatchPostgres::insert_messages(pqxx::work &txn) {
       return;
     }
     query << " ON CONFLICT DO NOTHING";
-    try {
-      txn.exec0(query.str());
-    } catch (const std::exception& exc) {
-      LOG(ERROR) << "Failed to run SQL query: " << query.str() << " Error: " << exc.what();
-      std::_Exit(1);
-    }
+    // LOG(INFO) << "Messages query size: " << double(query.str().length()) / 1024 / 1024;
+    txn.exec0(query.str());
   }
 
   // insert message contents
@@ -929,12 +923,8 @@ void InsertBatchPostgres::insert_messages(pqxx::work &txn) {
       return;
     }
     query << " ON CONFLICT DO NOTHING";
-    try {
-      txn.exec0(query.str());
-    } catch (const std::exception& exc) {
-      LOG(ERROR) << "Failed to run SQL query: " << query.str() << " Error: " << exc.what();
-      std::_Exit(1);
-    }
+    // LOG(INFO) << "Message countents query size: " << double(query.str().length()) / 1024 / 1024;
+    txn.exec0(query.str());
   }
 
   // unlock messages
@@ -977,6 +967,7 @@ void InsertBatchPostgres::insert_account_states(pqxx::work &transaction) {
   }
   query << " ON CONFLICT DO NOTHING";
   // LOG(DEBUG) << "Running SQL query: " << query.str();
+  // LOG(INFO) << "Account states query size: " << double(query.str().length()) / 1024 / 1024;
   transaction.exec0(query.str());
 }
 
@@ -1008,8 +999,29 @@ void InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
     } else {
       query << ", ";
     }
-    auto code_res = vm::std_boc_serialize(account_state.code);
-    auto data_res = vm::std_boc_serialize(account_state.data);
+    std::string code_str = "NULL";
+    std::string data_str = "NULL";
+
+    if (account_state.data.not_null() && (account_state.data->get_depth() <= max_data_depth_)){
+      auto data_res = vm::std_boc_serialize(account_state.data);
+      if (data_res.is_ok()){
+        data_str = txn.quote(td::base64_encode(data_res.move_as_ok().as_slice().str()));
+      }
+    } else {
+      if (account_state.data.not_null()) {
+        LOG(DEBUG) << "Large account data: " << account_state.account 
+                  << " Depth: " << account_state.data->get_depth();
+      }
+    }
+    {
+      auto code_res = vm::std_boc_serialize(account_state.code);
+      if (code_res.is_ok()){
+        code_str = txn.quote(td::base64_encode(code_res.move_as_ok().as_slice().str()));
+      }
+      if (code_str.length() > 128000) {
+        LOG(ERROR) << "Large account data:" << account_state.account;
+      }
+    }
     query << "("
           << TO_SQL_STRING(convert::to_raw_address(account_state.account)) << ","
           << "NULL,"
@@ -1021,9 +1033,8 @@ void InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
           << TO_SQL_OPTIONAL_STRING(account_state.frozen_hash) << ","
           << TO_SQL_OPTIONAL_STRING(account_state.data_hash) << ","
           << TO_SQL_OPTIONAL_STRING(account_state.code_hash) << ","
-          << (data_res.is_ok() ? txn.quote(td::base64_encode(data_res.move_as_ok().as_slice().str())) : "NULL") << ","
-          << (code_res.is_ok() ? txn.quote(td::base64_encode(code_res.move_as_ok().as_slice().str())) : "NULL")
-          << ")";
+          << data_str << ","
+          << code_str << ")";
   }
   if (is_first) {
     return;
@@ -1041,12 +1052,8 @@ void InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
         << "data_boc = EXCLUDED.data_boc, "
         << "code_boc = EXCLUDED.code_boc "
         << "WHERE latest_account_states.last_trans_lt < EXCLUDED.last_trans_lt";
-  try {
-    txn.exec0(query.str());
-  } catch (const std::exception& exc) {
-    LOG(ERROR) << "Failed to run SQL query: " << query.str() << " Error: " << exc.what();
-    std::_Exit(1);
-  }
+  // LOG(INFO) << "Latest account states query size: " << double(query.str().length()) / 1024 / 1024;
+  txn.exec0(query.str());
 }
 
 
@@ -1090,6 +1097,7 @@ void InsertBatchPostgres::insert_jetton_transfers(pqxx::work &transaction) {
   query << " ON CONFLICT DO NOTHING";
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
+  // LOG(INFO) << "Jetton transfers query size: " << double(query.str().length()) / 1024 / 1024;
   transaction.exec0(query.str());
 }
 
@@ -1126,6 +1134,7 @@ void InsertBatchPostgres::insert_jetton_burns(pqxx::work &transaction) {
   query << " ON CONFLICT DO NOTHING";
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
+  // LOG(INFO) << "Jetton burns query size: " << double(query.str().length()) / 1024 / 1024;
   transaction.exec0(query.str());
 }
 
@@ -1166,6 +1175,7 @@ void InsertBatchPostgres::insert_nft_transfers(pqxx::work &transaction) {
   query << " ON CONFLICT DO NOTHING";
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
+  // LOG(INFO) << "NFT transfers query size: " << double(query.str().length()) / 1024 / 1024;
   transaction.exec0(query.str());
 }
 
@@ -1499,7 +1509,7 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists transactions ("
-      "account char(68) not null, "
+      "account char(72) not null, "
       "hash char(44) not null, "
       "lt bigint not null, "
       "block_workchain integer, "
@@ -1564,8 +1574,8 @@ void InsertManagerPostgres::start_up() {
       "bounce_fwd_fees bigint, "
       "split_info_cur_shard_pfx_len int, "
       "split_info_acc_split_depth int, "
-      "split_info_this_addr char(68), "
-      "split_info_sibling_addr char(68), "
+      "split_info_this_addr char(72), "
+      "split_info_sibling_addr char(72), "
       "primary key (hash, lt), "
       "foreign key (block_workchain, block_shard, block_seqno) references blocks);\n"
     );
@@ -1576,8 +1586,8 @@ void InsertManagerPostgres::start_up() {
       "tx_lt bigint, "
       "msg_hash char(44), "
       "direction msg_direction, "
-      "source char(68), "
-      "destination char(68), "
+      "source char(72), "
+      "destination char(72), "
       "value bigint, "
       "fwd_fee bigint, "
       "ihr_fee bigint, "
@@ -1604,7 +1614,7 @@ void InsertManagerPostgres::start_up() {
     query += (
       "create table if not exists account_states ("
       "hash char(44) not null primary key, "
-      "account char(68), "
+      "account char(72), "
       "balance bigint, "
       "account_status account_status_type, "
       "frozen_hash char(44), "
@@ -1615,8 +1625,8 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists latest_account_states ("
-      "account char(68) not null primary key, "
-      "account_friendly char(68), "
+      "account char(72) not null primary key, "
+      "account_friendly char(72), "
       "hash char(44) not null, "
       "balance bigint, "
       "account_status account_status_type, "
@@ -1631,9 +1641,9 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists nft_collections ("
-      "address char(68) not null primary key, "
+      "address char(72) not null primary key, "
       "next_item_index numeric, "
-      "owner_address char(68), "
+      "owner_address char(72), "
       "collection_content jsonb, "
       "data_hash char(44), "
       "code_hash char(44), "
@@ -1644,11 +1654,11 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists nft_items ("
-      "address char(68) not null primary key, "
+      "address char(72) not null primary key, "
       "init boolean, "
       "index numeric, "
-      "collection_address char(68), "
-      "owner_address char(68), "
+      "collection_address char(72), "
+      "owner_address char(72), "
       "content jsonb, "
       "last_transaction_lt bigint, "
       "code_hash char(44), "
@@ -1660,10 +1670,10 @@ void InsertManagerPostgres::start_up() {
       "tx_hash char(44) not null, "
       "tx_lt bigint not null, "
       "query_id numeric, "
-      "nft_item_address char(68), "
-      "old_owner char(68), "
-      "new_owner char(68), "
-      "response_destination char(68), "
+      "nft_item_address char(72), "
+      "old_owner char(72), "
+      "new_owner char(72), "
+      "response_destination char(72), "
       "custom_payload text, "
       "forward_amount numeric, "
       "forward_payload text, "
@@ -1673,10 +1683,10 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists jetton_masters ("
-      "address char(68) not null primary key, "
+      "address char(72) not null primary key, "
       "total_supply numeric, "
       "mintable boolean, "
-      "admin_address char(68), "
+      "admin_address char(72), "
       "jetton_content jsonb, "
       "jetton_wallet_code_hash char(44), "
       "code_hash char(44), "
@@ -1688,10 +1698,10 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists jetton_wallets ("
-      "address char(68) not null primary key, "
+      "address char(72) not null primary key, "
       "balance numeric, "
-      "owner char(68), "
-      "jetton char(68), "
+      "owner char(72), "
+      "jetton char(72), "
       "last_transaction_lt bigint, "
       "code_hash char(44), "
       "data_hash char(44));\n"
@@ -1702,10 +1712,10 @@ void InsertManagerPostgres::start_up() {
       "tx_hash char(44) not null, "
       "tx_lt bigint not null, "
       "query_id numeric, "
-      "owner char(68), "
-      "jetton_wallet_address char(68), "
+      "owner char(72), "
+      "jetton_wallet_address char(72), "
       "amount numeric, "
-      "response_destination char(68), "
+      "response_destination char(72), "
       "custom_payload text, "
       "primary key (tx_hash, tx_lt), "
       "foreign key (tx_hash, tx_lt) references transactions);\n"
@@ -1717,10 +1727,10 @@ void InsertManagerPostgres::start_up() {
       "tx_lt bigint not null, "
       "query_id numeric, "
       "amount numeric, "
-      "source char(68), "
-      "destination char(68), "
-      "jetton_wallet_address char(68), "
-      "response_destination char(68), "
+      "source char(72), "
+      "destination char(72), "
+      "jetton_wallet_address char(72), "
+      "response_destination char(72), "
       "custom_payload text, "
       "forward_ton_amount numeric, "
       "forward_payload text, "
@@ -1740,6 +1750,11 @@ void InsertManagerPostgres::start_up() {
   alarm_timestamp() = td::Timestamp::in(1.0);
 }
 
+void InsertManagerPostgres::set_max_data_depth(std::int32_t value) {
+  LOG(INFO) << "InsertManagerPostgres max_data_depth set to " << value; 
+  max_data_depth_ = value;
+}
+
 void InsertManagerPostgres::upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) {
   td::actor::create_actor<UpsertJettonWalletPostgres>("upsertjettonwallet", credential_.get_connection_string(), std::move(jetton_wallet), std::move(promise)).release();
 }
@@ -1757,7 +1772,7 @@ void InsertManagerPostgres::upsert_nft_item(NFTItemData nft_item, td::Promise<td
 }
 
 void InsertManagerPostgres::create_insert_actor(std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise) {
-  td::actor::create_actor<InsertBatchPostgres>("insert_batch_postgres", credential_, std::move(insert_tasks), std::move(promise)).release();
+  td::actor::create_actor<InsertBatchPostgres>("insert_batch_postgres", credential_, std::move(insert_tasks), std::move(promise), max_data_depth_).release();
 }
 
 void InsertManagerPostgres::get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) {
