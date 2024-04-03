@@ -19,10 +19,13 @@ public:
   };
 private:
   InsertManagerPostgres::Credential credential_;
+  std::int32_t max_data_depth_ = 12;
 public:
   InsertManagerPostgres(InsertManagerPostgres::Credential credential) : credential_(credential) {}
 
   void start_up() override;
+
+  void set_max_data_depth(std::int32_t value);
 
   void create_insert_actor(std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise) override;
   void get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) override;
@@ -36,8 +39,8 @@ public:
 
 class InsertBatchPostgres: public td::actor::Actor {
 public:
-  InsertBatchPostgres(InsertManagerPostgres::Credential credential, std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise) :
-    credential_(std::move(credential)), insert_tasks_(std::move(insert_tasks)), promise_(std::move(promise)) {}
+  InsertBatchPostgres(InsertManagerPostgres::Credential credential, std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise, std::int32_t max_data_depth = 12) :
+    credential_(std::move(credential)), insert_tasks_(std::move(insert_tasks)), promise_(std::move(promise)), max_data_depth_(max_data_depth) {}
 
   void start_up() override;
 private:
@@ -45,6 +48,7 @@ private:
   std::string connection_string_;
   std::vector<InsertTaskStruct> insert_tasks_;
   td::Promise<td::Unit> promise_;
+  std::int32_t max_data_depth_;
 
   std::string stringify(schema::ComputeSkipReason compute_skip_reason);
   std::string stringify(schema::AccStatusChange acc_status_change);

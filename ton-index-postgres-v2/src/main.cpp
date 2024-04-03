@@ -36,6 +36,7 @@ int main(int argc, char *argv[]) {
 
   std::uint32_t max_active_tasks = 7;
   std::uint32_t max_insert_actors = 12;
+  std::int32_t max_data_depth = 12;
   
   QueueState max_queue{200000, 200000, 1000000, 1000000};
   QueueState batch_size{2000, 2000, 10000, 10000};
@@ -76,14 +77,24 @@ int main(int argc, char *argv[]) {
   p.add_option('d', "dbname", "PostgreSQL database name", [&](td::Slice value) { 
     credential.dbname = value.str();
   });
-  p.add_checked_option('f', "from", "Masterchain seqno to start indexing from", [&](td::Slice fname) { 
+  p.add_checked_option('f', "from", "Masterchain seqno to start indexing from", [&](td::Slice value) { 
     int v;
     try {
-      v = std::stoi(fname.str());
+      v = std::stoi(value.str());
     } catch (...) {
       return td::Status::Error(ton::ErrorCode::error, "bad value for --from: not a number");
     }
     last_known_seqno = v;
+    return td::Status::OK();
+  });
+  p.add_checked_option('\0', "max-data-depth", "Max data cell depth to store in latest account states", [&](td::Slice value) { 
+    int v;
+    try {
+      v = std::stoi(value.str());
+    } catch (...) {
+      return td::Status::Error(ton::ErrorCode::error, "bad value for --max-data-depth: not a number");
+    }
+    max_data_depth = v;
     return td::Status::OK();
   });
   p.add_checked_option('\0', "max-active-tasks", "Max active reading tasks", [&](td::Slice fname) { 
@@ -211,6 +222,7 @@ int main(int argc, char *argv[]) {
   scheduler.run_in_context([&] { 
     td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_parallel_inserts_actors, max_insert_actors);
     td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_insert_batch_size, batch_size);
+    td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_max_data_depth, max_data_depth);
     td::actor::send_closure(insert_manager_, &InsertManagerPostgres::print_info);
   });
   scheduler.run_in_context([&] { td::actor::send_closure(index_scheduler_, &IndexScheduler::run); });
