@@ -17,8 +17,38 @@ create index if not exists transactions_index_5 on transactions (hash);
 create index if not exists transactions_index_6 on transactions (trace_id);
 create index if not exists transactions_index_8 on transactions (mc_block_seqno);
 
+-- messages
+create index if not exists messages_index_0 on messages (tx_hash, tx_lt);
+create index if not exists messages_index_1 on messages (msg_hash, direction);
+create index if not exists messages_index_2 on messages (source);
+create index if not exists messages_index_3 on messages (destination);
+create index if not exists messages_index_4 on messages (created_lt);
+create index if not exists messages_index_5 on messages (body_hash, direction);
 
+-- account states
+create index if not exists latest_account_states_index_1 on latest_account_states (balance);
 
+-- jettons
+create index if not exists jetton_masters_index_2 on jetton_masters (admin_address);
 
+create index if not exists jetton_wallets_index_2 on jetton_wallets (owner);
+create index if not exists jetton_wallets_index_3 on jetton_wallets (jetton);
+
+create index if not exists jetton_transfers_index_2 on jetton_transfers (source);
+create index if not exists jetton_transfers_index_3 on jetton_transfers (destination);
+create index if not exists jetton_transfers_index_4 on jetton_transfers (jetton_wallet_address);
+
+create index if not exists jetton_burns_index_2 on jetton_burns (owner);
+create index if not exists jetton_burns_index_3 on jetton_burns (jetton_wallet_address);
+
+-- nfts
+create index if not exists nft_collections_index_2 on nft_collections (owner_address);
+
+create index if not exists nft_items_index_2 on nft_items (collection_address);
+create index if not exists nft_items_index_3 on nft_items (owner_address);
+
+create index if not exists nft_transfers_index_2 on nft_transfers (nft_item_address);
+create index if not exists nft_transfers_index_3 on nft_transfers (old_owner);
+create index if not exists nft_transfers_index_4 on nft_transfers (new_owner);
 
 commit;
