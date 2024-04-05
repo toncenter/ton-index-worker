@@ -3,6 +3,7 @@ begin;
 -- blocks
 create index if not exists blocks_index_2 on blocks (gen_utime);
 create index if not exists blocks_index_3 on blocks (mc_block_workchain, mc_block_shard, mc_block_seqno);
+create index if not exists blocks_index_3a on blocks(mc_block_senqo);
 create index if not exists blocks_index_4 on blocks (seqno) where (workchain = '-1'::integer);
 create index if not exists blocks_index_5 on blocks (start_lt);
 
@@ -18,12 +19,12 @@ create index if not exists transactions_index_6 on transactions (trace_id);
 create index if not exists transactions_index_8 on transactions (mc_block_seqno);
 
 -- messages
-create index if not exists messages_index_0 on messages (tx_hash, tx_lt);
-create index if not exists messages_index_1 on messages (msg_hash, direction);
-create index if not exists messages_index_2 on messages (source);
-create index if not exists messages_index_3 on messages (destination);
+-- create index if not exists messages_index_0 on messages (tx_hash, tx_lt);
+create index if not exists messages_index_1 on messages (msg_hash);
+create index if not exists messages_index_2 on messages (source, created_lt);
+create index if not exists messages_index_3 on messages (destination, created_lt);
 create index if not exists messages_index_4 on messages (created_lt);
-create index if not exists messages_index_5 on messages (body_hash, direction);
+create index if not exists messages_index_5 on messages (body_hash, created_lt);
 
 -- account states
 create index if not exists latest_account_states_index_1 on latest_account_states (balance);
