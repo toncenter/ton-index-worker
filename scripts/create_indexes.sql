@@ -3,7 +3,7 @@ begin;
 -- blocks
 create index if not exists blocks_index_2 on blocks (gen_utime);
 create index if not exists blocks_index_3 on blocks (mc_block_workchain, mc_block_shard, mc_block_seqno);
-create index if not exists blocks_index_3a on blocks(mc_block_senqo);
+create index if not exists blocks_index_3a on blocks(mc_block_seqno);
 create index if not exists blocks_index_4 on blocks (seqno) where (workchain = '-1'::integer);
 create index if not exists blocks_index_5 on blocks (start_lt);
 
