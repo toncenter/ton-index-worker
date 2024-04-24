@@ -26,7 +26,7 @@ create index if not exists messages_index_5 on messages (body_hash);
 
 -- account states
 create index if not exists latest_account_states_index_1 on latest_account_states (balance);
-create index if not exists latest_account_states_address_book_index on latest_account_states (account) include (account_friendly);
+create index if not exists latest_account_states_address_book_index on latest_account_states (account) include (account_friendly, code_hash, account_status);
 
 -- jettons
 create index if not exists jetton_masters_index_2 on jetton_masters (admin_address);
