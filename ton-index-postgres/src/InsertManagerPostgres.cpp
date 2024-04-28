@@ -4,9 +4,9 @@
 #include "convert-utils.h"
 
 #define TO_SQL_BOOL(x) ((x) ? "TRUE" : "FALSE")
-#define TO_SQL_STRING(x) ("'" + (x) + "'")
+#define TO_SQL_STRING(x) (transaction.quote(x))
 #define TO_SQL_OPTIONAL(x) ((x) ? std::to_string(x.value()) : "NULL")
-#define TO_SQL_OPTIONAL_STRING(x) ((x) ? ("'" + x.value() + "'") : "NULL")
+#define TO_SQL_OPTIONAL_STRING(x) ((x) ? transaction.quote(x) : "NULL")
 
 std::string content_to_json_string(const std::map<std::string, std::string> &content) {
   td::JsonBuilder jetton_content_json;
@@ -473,7 +473,7 @@ void InsertBatchPostgres::insert_blocks(pqxx::work &transaction, const std::vect
             << block.workchain << ","
             << block.shard << ","
             << block.seqno << ","
-            << TO_SQL_STRING(block.root_hash) << ","
+            << transaction.quote(block.root_hash) << ","
             << TO_SQL_STRING(block.file_hash) << ","
             << TO_SQL_OPTIONAL(block.mc_block_workchain) << ","
             << TO_SQL_OPTIONAL(block.mc_block_shard) << ","
@@ -551,7 +551,7 @@ void InsertBatchPostgres::insert_transactions(pqxx::work &transaction, const std
   bool is_first = true;
   for (const auto& task : insert_tasks) {
     for (const auto &blk : task.parsed_block_->blocks_) {
-      for (const auto& transaction : blk.transactions) {
+      for (const auto& tx : blk.transactions) {
         if (is_first) {
           is_first = false;
         } else {
@@ -562,18 +562,18 @@ void InsertBatchPostgres::insert_transactions(pqxx::work &transaction, const std
               << blk.shard << ","
               << blk.seqno << ","
               << TO_SQL_OPTIONAL(blk.mc_block_seqno) << ","
-              << TO_SQL_STRING(convert::to_raw_address(transaction.account)) << ","
-              << TO_SQL_STRING(td::base64_encode(transaction.hash.as_slice())) << ","
-              << transaction.lt << ","
-              << TO_SQL_STRING(td::base64_encode(transaction.prev_trans_hash.as_slice())) << ","
-              << transaction.prev_trans_lt << ","
-              << transaction.now << ","
-              << TO_SQL_STRING(stringify(transaction.orig_status)) << ","
-              << TO_SQL_STRING(stringify(transaction.end_status)) << ","
-              << transaction.total_fees << ","
-              << TO_SQL_STRING(td::base64_encode(transaction.account_state_hash_before.as_slice())) << ","
-              << TO_SQL_STRING(td::base64_encode(transaction.account_state_hash_after.as_slice())) << ","
-              << "'" << jsonify(transaction.description) << "'"  // FIXME: remove for production
+              << TO_SQL_STRING(convert::to_raw_address(tx.account)) << ","
+              << TO_SQL_STRING(td::base64_encode(tx.hash.as_slice())) << ","
+              << tx.lt << ","
+              << TO_SQL_STRING(td::base64_encode(tx.prev_trans_hash.as_slice())) << ","
+              << tx.prev_trans_lt << ","
+              << tx.now << ","
+              << TO_SQL_STRING(stringify(tx.orig_status)) << ","
+              << TO_SQL_STRING(stringify(tx.end_status)) << ","
+              << tx.total_fees << ","
+              << TO_SQL_STRING(td::base64_encode(tx.account_state_hash_before.as_slice())) << ","
+              << TO_SQL_STRING(td::base64_encode(tx.account_state_hash_after.as_slice())) << ","
+              << "'" << jsonify(tx.description) << "'"  // FIXME: remove for production
               << ")";
       }
     }
@@ -808,30 +808,42 @@ void InsertBatchPostgres::insert_latest_account_states(pqxx::work &transaction, 
 }
 
 void InsertBatchPostgres::insert_jetton_masters(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks) {
+  std::map<std::string, JettonMasterData> jetton_masters;
+  for (const auto& task : insert_tasks) {
+    for (const auto& jetton_master : task.parsed_block_->get_accounts<JettonMasterData>()) {
+      auto existing = jetton_masters.find(jetton_master.address);
+      if (existing == jetton_masters.end()) {
+        jetton_masters[jetton_master.address] = jetton_master;
+      } else {
+        if (existing->second.last_transaction_lt < jetton_master.last_transaction_lt) {
+          jetton_masters[jetton_master.address] = jetton_master;
+        }
+      }
+    }
+  }
+
   std::ostringstream query;
   query << "INSERT INTO jetton_masters (address, total_supply, mintable, admin_address, jetton_content, jetton_wallet_code_hash, data_hash, code_hash, last_transaction_lt, code_boc, data_boc) VALUES ";
   bool is_first = true;
-  for (const auto& task : insert_tasks) {
-    for (const auto& jetton_master : task.parsed_block_->get_accounts<JettonMasterData>()) {
-      if (is_first) {
-        is_first = false;
-      } else {
-        query << ", ";
-      }
-      query << "("
-            << TO_SQL_STRING(jetton_master.address) << ","
-            << jetton_master.total_supply << ","
-            << TO_SQL_BOOL(jetton_master.mintable) << ","
-            << TO_SQL_OPTIONAL_STRING(jetton_master.admin_address) << ","
-            << (jetton_master.jetton_content ? content_to_json_string(jetton_master.jetton_content.value()).c_str() : "NONE") << ","
-            << TO_SQL_STRING(td::base64_encode(jetton_master.jetton_wallet_code_hash.as_slice())) << ","
-            << TO_SQL_STRING(td::base64_encode(jetton_master.data_hash.as_slice())) << ","
-            << TO_SQL_STRING(td::base64_encode(jetton_master.code_hash.as_slice())) << ","
-            << jetton_master.last_transaction_lt << ","
-            << TO_SQL_STRING(jetton_master.code_boc) << ","
-            << TO_SQL_STRING(jetton_master.data_boc)
-            << ")";
+  for (const auto& [addr, jetton_master] : jetton_masters) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      query << ", ";
     }
+    query << "("
+          << TO_SQL_STRING(jetton_master.address) << ","
+          << jetton_master.total_supply << ","
+          << TO_SQL_BOOL(jetton_master.mintable) << ","
+          << TO_SQL_OPTIONAL_STRING(jetton_master.admin_address) << ","
+          << (jetton_master.jetton_content ? TO_SQL_STRING(content_to_json_string(jetton_master.jetton_content.value())) : "NULL") << ","
+          << TO_SQL_STRING(td::base64_encode(jetton_master.jetton_wallet_code_hash.as_slice())) << ","
+          << TO_SQL_STRING(td::base64_encode(jetton_master.data_hash.as_slice())) << ","
+          << TO_SQL_STRING(td::base64_encode(jetton_master.code_hash.as_slice())) << ","
+          << jetton_master.last_transaction_lt << ","
+          << TO_SQL_STRING(jetton_master.code_boc) << ","
+          << TO_SQL_STRING(jetton_master.data_boc)
+          << ")";
   }
   if (is_first) {
     return;
@@ -853,26 +865,38 @@ void InsertBatchPostgres::insert_jetton_masters(pqxx::work &transaction, const s
 }
 
 void InsertBatchPostgres::insert_jetton_wallets(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks) {
+  std::map<std::string, JettonWalletData> jetton_wallets;
+  for (const auto& task : insert_tasks) {
+    for (const auto& jetton_wallet : task.parsed_block_->get_accounts<JettonWalletData>()) {
+      auto existing = jetton_wallets.find(jetton_wallet.address);
+      if (existing == jetton_wallets.end()) {
+        jetton_wallets[jetton_wallet.address] = jetton_wallet;
+      } else {
+        if (existing->second.last_transaction_lt < jetton_wallet.last_transaction_lt) {
+          jetton_wallets[jetton_wallet.address] = jetton_wallet;
+        }
+      }
+    }
+  }
+
   std::ostringstream query;
   query << "INSERT INTO jetton_wallets (balance, address, owner, jetton, last_transaction_lt, code_hash, data_hash) VALUES ";
   bool is_first = true;
-  for (const auto& task : insert_tasks) {
-    for (const auto& jetton_master : task.parsed_block_->get_accounts<JettonWalletData>()) {
-      if (is_first) {
-        is_first = false;
-      } else {
-        query << ", ";
-      }
-      query << "("
-            << jetton_master.balance << ","
-            << TO_SQL_STRING(jetton_master.address) << ","
-            << TO_SQL_STRING(jetton_master.owner) << ","
-            << TO_SQL_STRING(jetton_master.jetton) << ","
-            << jetton_master.last_transaction_lt << ","
-            << TO_SQL_STRING(td::base64_encode(jetton_master.code_hash.as_slice())) << ","
-            << TO_SQL_STRING(td::base64_encode(jetton_master.data_hash.as_slice()))
-            << ")";
+  for (const auto& [addr, jetton_wallet] : jetton_wallets) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      query << ", ";
     }
+    query << "("
+          << jetton_wallet.balance << ","
+          << TO_SQL_STRING(jetton_wallet.address) << ","
+          << TO_SQL_STRING(jetton_wallet.owner) << ","
+          << TO_SQL_STRING(jetton_wallet.jetton) << ","
+          << jetton_wallet.last_transaction_lt << ","
+          << TO_SQL_STRING(td::base64_encode(jetton_wallet.code_hash.as_slice())) << ","
+          << TO_SQL_STRING(td::base64_encode(jetton_wallet.data_hash.as_slice()))
+          << ")";
   }
   if (is_first) {
     return;
@@ -890,28 +914,39 @@ void InsertBatchPostgres::insert_jetton_wallets(pqxx::work &transaction, const s
 }
 
 void InsertBatchPostgres::insert_nft_collections(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks) {
+  std::map<std::string, NFTCollectionData> nft_collections;
+  for (const auto& task : insert_tasks) {
+    for (const auto& nft_collection : task.parsed_block_->get_accounts<NFTCollectionData>()) {
+      auto existing = nft_collections.find(nft_collection.address);
+      if (existing == nft_collections.end()) {
+        nft_collections[nft_collection.address] = nft_collection;
+      } else {
+        if (existing->second.last_transaction_lt < nft_collection.last_transaction_lt) {
+          nft_collections[nft_collection.address] = nft_collection;
+        }
+      }
+    }
+  }
   std::ostringstream query;
   query << "INSERT INTO  nft_collections (address, next_item_index, owner_address, collection_content, data_hash, code_hash, last_transaction_lt, code_boc, data_boc) VALUES ";
   bool is_first = true;
-  for (const auto& task : insert_tasks) {
-    for (const auto& nft_collection : task.parsed_block_->get_accounts<NFTCollectionData>()) {
-      if (is_first) {
-        is_first = false;
-      } else {
-        query << ", ";
-      }
-      query << "("
-            << TO_SQL_STRING(nft_collection.address) << ","
-            << nft_collection.next_item_index << ","
-            << TO_SQL_OPTIONAL_STRING(nft_collection.owner_address) << ","
-            << (nft_collection.collection_content ? content_to_json_string(nft_collection.collection_content.value()).c_str() : "NONE") << ","
-            << TO_SQL_STRING(td::base64_encode(nft_collection.data_hash.as_slice())) << ","
-            << TO_SQL_STRING(td::base64_encode(nft_collection.code_hash.as_slice())) << ","
-            << nft_collection.last_transaction_lt << ","
-            << TO_SQL_STRING(nft_collection.code_boc) << ","
-            << TO_SQL_STRING(nft_collection.data_boc)
-            << ")";
+  for (const auto& [addr, nft_collection] : nft_collections) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      query << ", ";
     }
+    query << "("
+          << TO_SQL_STRING(nft_collection.address) << ","
+          << nft_collection.next_item_index << ","
+          << TO_SQL_OPTIONAL_STRING(nft_collection.owner_address) << ","
+          << (nft_collection.collection_content ? TO_SQL_STRING(content_to_json_string(nft_collection.collection_content.value())) : "NULL") << ","
+          << TO_SQL_STRING(td::base64_encode(nft_collection.data_hash.as_slice())) << ","
+          << TO_SQL_STRING(td::base64_encode(nft_collection.code_hash.as_slice())) << ","
+          << nft_collection.last_transaction_lt << ","
+          << TO_SQL_STRING(nft_collection.code_boc) << ","
+          << TO_SQL_STRING(nft_collection.data_boc)
+          << ")";
   }
   if (is_first) {
     return;
@@ -931,28 +966,39 @@ void InsertBatchPostgres::insert_nft_collections(pqxx::work &transaction, const 
 }
 
 void InsertBatchPostgres::insert_nft_items(pqxx::work &transaction, const std::vector<InsertTaskStruct>& insert_tasks) {
+  std::map<std::string, NFTItemData> nft_items;
+  for (const auto& task : insert_tasks) {
+    for (const auto& nft_item : task.parsed_block_->get_accounts<NFTItemData>()) {
+      auto existing = nft_items.find(nft_item.address);
+      if (existing == nft_items.end()) {
+        nft_items[nft_item.address] = nft_item;
+      } else {
+        if (existing->second.last_transaction_lt < nft_item.last_transaction_lt) {
+          nft_items[nft_item.address] = nft_item;
+        }
+      }
+    }
+  }
   std::ostringstream query;
   query << "INSERT INTO nft_items (address, init, index, collection_address, owner_address, content, last_transaction_lt, code_hash, data_hash) VALUES ";
   bool is_first = true;
-  for (const auto& task : insert_tasks) {
-    for (const auto& nft_item : task.parsed_block_->get_accounts<NFTItemData>()) {
-      if (is_first) {
-        is_first = false;
-      } else {
-        query << ", ";
-      }
-      query << "("
-            << TO_SQL_STRING(nft_item.address) << ","
-            << TO_SQL_BOOL(nft_item.init) << ","
-            << nft_item.index << ","
-            << TO_SQL_STRING(nft_item.collection_address) << ","
-            << TO_SQL_STRING(nft_item.owner_address) << ","
-            << (nft_item.content ? content_to_json_string(nft_item.content.value()).c_str() : "NONE") << ","
-            << nft_item.last_transaction_lt << ","
-            << TO_SQL_STRING(td::base64_encode(nft_item.code_hash.as_slice())) << ","
-            << TO_SQL_STRING(td::base64_encode(nft_item.data_hash.as_slice()))
-            << ")";
+  for (const auto& [addr, nft_item] : nft_items) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      query << ", ";
     }
+    query << "("
+          << TO_SQL_STRING(nft_item.address) << ","
+          << TO_SQL_BOOL(nft_item.init) << ","
+          << nft_item.index << ","
+          << TO_SQL_STRING(nft_item.collection_address) << ","
+          << TO_SQL_STRING(nft_item.owner_address) << ","
+          << (nft_item.content ? TO_SQL_STRING(content_to_json_string(nft_item.content.value())) : "NULL") << ","
+          << nft_item.last_transaction_lt << ","
+          << TO_SQL_STRING(td::base64_encode(nft_item.code_hash.as_slice())) << ","
+          << TO_SQL_STRING(td::base64_encode(nft_item.data_hash.as_slice()))
+          << ")";
   }
   if (is_first) {
     return;
