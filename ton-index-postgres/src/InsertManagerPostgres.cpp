@@ -6,7 +6,7 @@
 #define TO_SQL_BOOL(x) ((x) ? "TRUE" : "FALSE")
 #define TO_SQL_STRING(x) (transaction.quote(x))
 #define TO_SQL_OPTIONAL(x) ((x) ? std::to_string(x.value()) : "NULL")
-#define TO_SQL_OPTIONAL_STRING(x) ((x) ? transaction.quote(x) : "NULL")
+#define TO_SQL_OPTIONAL_STRING(x) ((x) ? transaction.quote(x.value()) : "NULL")
 
 std::string content_to_json_string(const std::map<std::string, std::string> &content) {
   td::JsonBuilder jetton_content_json;
