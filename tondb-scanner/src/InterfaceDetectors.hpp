@@ -252,8 +252,8 @@ public:
     if (jetton_content.is_ok()) {
       data.jetton_content = jetton_content.move_as_ok();
     } else {
-      LOG(WARNING) << "Failed to parse jetton content for " << convert::to_raw_address(address) << ": " << jetton_content.error();
-      LOG(WARNING) << convert::to_bytes(stack[3].as_cell()).move_as_ok().value();
+      LOG(WARNING) << "Failed to parse jetton content for " << convert::to_raw_address(address) << ": " << jetton_content.error()
+                   << " Content: " << convert::to_bytes(stack[3].as_cell()).move_as_ok().value();
     }
     data.jetton_wallet_code_hash = stack[4].as_cell()->get_hash();
     
@@ -716,8 +716,8 @@ private:
     if (collection_content.is_ok()) {
       data.collection_content = collection_content.move_as_ok();
     } else {
-      LOG(WARNING) << "Failed to parse collection content for " << convert::to_raw_address(address) << ": " << collection_content.error();
-      LOG(WARNING) << convert::to_bytes(stack[1].as_cell()).move_as_ok().value();
+      LOG(WARNING) << "Failed to parse collection content for " << convert::to_raw_address(address) << ": " << collection_content.error()
+                   << " Content: " << convert::to_bytes(stack[1].as_cell()).move_as_ok().value();
     }
     
     auto cache_promise = td::PromiseCreator::lambda([this, promise = std::move(promise), data](td::Result<td::Unit> r) mutable {
@@ -898,8 +898,8 @@ private:
       if (content.is_ok()) {
         data.content = content.move_as_ok();
       } else {
-        LOG(WARNING) << "Failed to parse content for " << convert::to_raw_address(address) << ": " << content.error();
-        LOG(WARNING) << convert::to_bytes(stack[4].as_cell()).move_as_ok().value();
+        LOG(WARNING) << "Failed to parse content for " << convert::to_raw_address(address) << ": " << content.error()
+                     << " Content: " << convert::to_bytes(stack[4].as_cell()).move_as_ok().value();
       }
       auto cache_promise = td::PromiseCreator::lambda([promise = std::move(promise), data](td::Result<td::Unit> r) mutable {
         if (r.is_error()) {
@@ -913,14 +913,14 @@ private:
       auto ind_content = stack[4].as_cell();
       auto collection_address = block::StdAddress::parse(data.collection_address);
       if (collection_address.is_error()) {
-        LOG(ERROR) << "Failed to parse collection address for " << convert::to_raw_address(address) << ": " << collection_address.error();
+        LOG(WARNING) << "Failed to parse collection address for " << convert::to_raw_address(address) << ": " << collection_address.error();
         promise.set_error(td::Status::Error(ErrorCode::DATA_PARSING_ERROR, PSLICE() << "Failed to parse collection address for " << convert::to_raw_address(address) << ": " << collection_address.error()));
         return;
       }
       td::actor::send_closure(collection_detector_, &NFTCollectionDetector::get_from_cache_or_shard, collection_address.move_as_ok(), blocks_ds,
                               td::PromiseCreator::lambda([this, SelfId = actor_id(this), ind_content, address, data, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<NFTCollectionData> collection_res) mutable {
         if (collection_res.is_error()) {
-          LOG(ERROR) << "Failed to get collection for " << convert::to_raw_address(address) << ": " << collection_res.error();
+          LOG(WARNING) << "Failed to get collection for " << convert::to_raw_address(address) << ": " << collection_res.error();
           promise.set_error(collection_res.move_as_error_prefix("Failed to get collection for " + convert::to_raw_address(address) + ": "));
           return;
         }
@@ -928,15 +928,15 @@ private:
         auto collection_data = collection_res.move_as_ok();
         auto content = get_content(data.index, ind_content, collection_data, code_cell, data_cell, blocks_ds);
         if (content.is_error()) {
-          LOG(ERROR) << "Failed to parse content for " << convert::to_raw_address(address) << ": " << content.error();
-          LOG(ERROR) << convert::to_bytes(ind_content).move_as_ok().value();
+          LOG(WARNING) << "Failed to parse content for " << convert::to_raw_address(address) << ": " << content.error() 
+                       << " Content: " << convert::to_bytes(ind_content).move_as_ok().value();
         } else {
           data.content = content.move_as_ok();
         }
 
         auto verify_r = verify_belonging_to_collection(data, collection_data, blocks_ds);
         if (verify_r.is_error()) {
-          LOG(ERROR) << "Failed to verify belonging to collection for " << convert::to_raw_address(address) << ": " << verify_r.error();
+          LOG(WARNING) << "Failed to verify belonging to collection for " << convert::to_raw_address(address) << ": " << verify_r.error();
           promise.set_error(verify_r.move_as_error_prefix(PSLICE() << "Failed to verify belonging to collection for " << convert::to_raw_address(address) << ": " << verify_r.error()));
           return;
         }

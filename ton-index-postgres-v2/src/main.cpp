@@ -243,9 +243,9 @@ int main(int argc, char *argv[]) {
   });
   scheduler.run_in_context([&] { td::actor::send_closure(index_scheduler_, &IndexScheduler::run); });
   
-  while(scheduler.run(1)) {
+  while(scheduler.run(1) && !IndexScheduler::is_finished) {
     // do something
   }
   LOG(INFO) << "Done!";
-  return 0;
+  std::_Exit(0);
 }

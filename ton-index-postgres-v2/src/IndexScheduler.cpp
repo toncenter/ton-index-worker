@@ -4,6 +4,8 @@
 #include <iostream>
 
 
+std::atomic<bool> IndexScheduler::is_finished = false;
+
 void IndexScheduler::start_up() {
     event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
 }
@@ -65,7 +67,7 @@ void IndexScheduler::run() {
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<std::vector<std::uint32_t>> R) {
         td::actor::send_closure(SelfId, &IndexScheduler::got_existing_seqnos, std::move(R));
     });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P));
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P), from_seqno_, to_seqno_);
 }
 
 void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> R) {
@@ -82,12 +84,16 @@ void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> 
 }
 
 void IndexScheduler::got_last_known_seqno(std::uint32_t last_known_seqno) {
+    if (last_known_seqno_ > to_seqno_) 
+        return;
     int skipped_count_ = 0;
+    // LOG(WARNING) << "Force: " << force_index_ << " from: " << from_seqno_ << " to: " << to_seqno_ 
+    //              << " last_known: " << last_known_seqno_ << " new last_known: " << last_known_seqno;
     for(auto seqno = last_known_seqno_ + 1; seqno <= last_known_seqno; ++seqno) {
-        if (existing_seqnos_.find(seqno) != existing_seqnos_.end()) {
+        if (!force_index_ && (existing_seqnos_.find(seqno) != existing_seqnos_.end())) {
             ++skipped_count_;
         }
-        else {
+        else if ((from_seqno_ <= 0 || seqno >= from_seqno_) && (to_seqno_ <= 0 || seqno <= to_seqno_)) {
             queued_seqnos_.push(seqno);
         }
     }
@@ -216,5 +222,9 @@ void IndexScheduler::schedule_next_seqnos() {
         LOG(INFO) << "Syncronization complete!";
         out_of_sync_ = false;
         td::actor::send_closure(db_scanner_, &DbScanner::set_out_of_sync, out_of_sync_);
+    }
+
+    if(to_seqno_ > 0 && last_known_seqno_ > to_seqno_ && queued_seqnos_.empty()) {
+        is_finished.store(true);
     }
 }

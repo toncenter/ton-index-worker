@@ -47,6 +47,8 @@ public:
   void start_up() override;
   void alarm() override;
   void run();
+
+  static std::atomic<bool> is_finished;
 private:
   void schedule_next_seqnos();
 
