@@ -30,7 +30,9 @@ int main(int argc, char *argv[]) {
   td::int32 stats_timeout = 10;
   std::string db_root;
   td::uint32 last_known_seqno = 0;
-
+  td::uint32 from_seqno = 0;
+  td::uint32 to_seqno = 0;
+  bool force_index = false;
   InsertManagerPostgres::Credential credential;
 
   std::uint32_t max_active_tasks = 7;
@@ -83,9 +85,24 @@ int main(int argc, char *argv[]) {
     } catch (...) {
       return td::Status::Error(ton::ErrorCode::error, "bad value for --from: not a number");
     }
-    last_known_seqno = v;
+    from_seqno = v;
     return td::Status::OK();
   });
+  p.add_checked_option('\0', "to", "Masterchain seqno to end indexing", [&](td::Slice value) { 
+    int v;
+    try {
+      v = std::stoi(value.str());
+    } catch (...) {
+      return td::Status::Error(ton::ErrorCode::error, "bad value for --to: not a number");
+    }
+    to_seqno = v;
+    return td::Status::OK();
+  });
+  p.add_option('\0', "force", "Ignore existing seqnos and force reindex", [&]() {
+    force_index = true;
+    LOG(WARNING) << "Force reindexing enabled";
+  });
+
   p.add_checked_option('\0', "max-data-depth", "Max data cell depth to store in latest account states", [&](td::Slice value) { 
     int v;
     try {
@@ -216,7 +233,7 @@ int main(int argc, char *argv[]) {
   scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary); });
 
   scheduler.run_in_context([&] { index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-    insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout); 
+    insert_manager_.get(), parse_manager_.get(), from_seqno, to_seqno, force_index, max_active_tasks, max_queue, stats_timeout); 
   });
   scheduler.run_in_context([&] { 
     td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_parallel_inserts_actors, max_insert_actors);

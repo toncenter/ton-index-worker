@@ -29,11 +29,6 @@ public:
 
   void create_insert_actor(std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise) override;
   void get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise) override;
-
-  void upsert_jetton_wallet(JettonWalletData jetton_wallet, td::Promise<td::Unit> promise) override;
-  void upsert_jetton_master(JettonMasterData jetton_wallet, td::Promise<td::Unit> promise) override;
-  void upsert_nft_collection(NFTCollectionData nft_collection, td::Promise<td::Unit> promise) override;
-  void upsert_nft_item(NFTItemData nft_item, td::Promise<td::Unit> promise) override;
 };
 
 
@@ -67,4 +62,8 @@ private:
   void insert_jetton_transfers(pqxx::work &txn);
   void insert_jetton_burns(pqxx::work &txn);
   void insert_nft_transfers(pqxx::work &txn);
+  void insert_jetton_masters(pqxx::work &txn);
+  void insert_jetton_wallets(pqxx::work &txn);
+  void insert_nft_collections(pqxx::work &txn);
+  void insert_nft_items(pqxx::work &txn);
 };
