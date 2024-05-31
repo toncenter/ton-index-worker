@@ -6,10 +6,9 @@
 
 #include "crypto/vm/cp0.h"
 
-#include "DataParser.h"
 #include "DbScanner.h"
 #include "EventProcessor.h"
-#include "TraceEmulator.h"
+#include "TraceInserter.h"
 
 
 int main(int argc, char *argv[]) {
@@ -19,10 +18,8 @@ int main(int argc, char *argv[]) {
   CHECK(vm::init_op_cp0());
 
   // options
-  td::uint32 threads = 7;
-  td::int32 stats_timeout = 10;
   std::string db_root;
-  std::uint32_t max_active_tasks = 7;
+  td::uint32 threads = 7;
   
   
   td::OptionParser p;
@@ -37,28 +34,6 @@ int main(int argc, char *argv[]) {
   p.add_option('D', "db", "Path to TON DB folder", [&](td::Slice fname) { 
     db_root = fname.str();
   });
-  
-  p.add_checked_option('\0', "max-active-tasks", "Max active tasks", [&](td::Slice fname) { 
-    int v;
-    try {
-      v = std::stoi(fname.str());
-    } catch (...) {
-      return td::Status::Error(ton::ErrorCode::error, "bad value for --max-active-tasks: not a number");
-    }
-    max_active_tasks = v;
-    return td::Status::OK();
-  });
-  
-  p.add_checked_option('\0', "stats-freq", "Pause between printing stats in seconds", [&](td::Slice fname) { 
-    int v;
-    try {
-      v = std::stoi(fname.str());
-    } catch (...) {
-      return td::Status::Error(ton::ErrorCode::error, "bad value for --threads: not a number");
-    }
-    stats_timeout = v;
-    return td::Status::OK();
-  });
 
   p.add_checked_option('t', "threads", "Scheduler threads (default: 7)", [&](td::Slice fname) { 
     int v;
@@ -71,19 +46,29 @@ int main(int argc, char *argv[]) {
     return td::Status::OK();
   });
 
+  p.add_option('\0', "--redis", "Redis URI (default: 'tcp://127.0.0.1:6379')", [&](td::Slice fname) { 
+    TraceInserter::redis_uri = fname.str();
+  });
+
+
   auto S = p.run(argc, argv);
   if (S.is_error()) {
     LOG(ERROR) << "failed to parse options: " << S.move_as_error();
     std::_Exit(2);
   }
 
-  td::actor::Scheduler scheduler({threads, threads});
+  if (db_root.size() == 0) {
+    std::cerr << "'--db' option missing" << std::endl;
+    std::_Exit(2);
+  }
+
+  td::actor::Scheduler scheduler({threads});
   td::actor::ActorOwn<DbScanner> db_scanner;
 
   scheduler.run_in_context([&] { 
     db_scanner = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_readonly);
     td::actor::create_actor<TraceEmulatorScheduler>("integritychecker", 
-                          db_scanner.get(), stats_timeout).release();
+                          db_scanner.get()).release();
   });
   
   scheduler.run();

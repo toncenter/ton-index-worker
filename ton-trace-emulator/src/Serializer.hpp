@@ -572,7 +572,7 @@ td::Result<Transaction> parse_tx(td::Ref<vm::Cell> root, ton::WorkchainId workch
 }
 
 td::Result<std::vector<std::string>> serialize_trace(std::shared_ptr<Trace> root) {
-  if (!root) return {};
+  if (!root) return td::Status::Error("Root is null");
 
   std::vector<std::string> serialized_nodes;
   std::queue<Trace *> queue;

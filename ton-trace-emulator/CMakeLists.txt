@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 add_executable(ton-trace-emulator
     src/main.cpp
     src/TraceEmulator.cpp
+    src/TraceInserter.cpp
 )
 
 target_include_directories(ton-trace-emulator

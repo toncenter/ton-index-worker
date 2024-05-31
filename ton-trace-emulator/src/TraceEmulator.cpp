@@ -5,7 +5,7 @@
 #include <tdutils/td/utils/filesystem.h>
 #include <emulator/transaction-emulator.h>
 #include "TraceEmulator.h"
-#include "RedisDb.h"
+#include "TraceInserter.h"
 
 
 struct BitArrayHasher {
@@ -79,7 +79,7 @@ public:
                     }
                     block::gen::TransactionDescr::Record_trans_ord descr;
                     if (!tlb::unpack_cell(trans.description, descr)) {
-                        LOG(WARNING) << "Skipping non ord transaction";
+                        LOG(WARNING) << "Skipping non ord transaction " << tvalue->get_hash().bits().to_hex();
                         continue;
                     }
 
@@ -542,7 +542,7 @@ void TraceEmulatorScheduler::got_last_mc_seqno(ton::BlockSeqno last_known_seqno)
         return;
     }
     LOG(INFO) << "New masterchain block " << last_known_seqno;
-    if (last_known_seqno > last_known_seqno_ - 1) {
+    if (last_known_seqno > last_known_seqno_ + 1) {
         LOG(WARNING) << "More than one new masterchain block appeared. Skipping to the newest one, from " << last_known_seqno_ << " to " << last_known_seqno;
     }
     last_known_seqno_ = last_known_seqno;
