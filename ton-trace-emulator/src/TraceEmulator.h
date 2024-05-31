@@ -10,6 +10,7 @@ struct Trace {
     ton::WorkchainId workchain;
     std::vector<Trace *> children;
     td::Ref<vm::Cell> transaction_root;
+    bool emulated;
 
     ~Trace() {
         for (Trace* child : children) {

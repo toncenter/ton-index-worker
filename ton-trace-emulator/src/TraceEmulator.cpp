@@ -79,7 +79,7 @@ public:
                     }
                     block::gen::TransactionDescr::Record_trans_ord descr;
                     if (!tlb::unpack_cell(trans.description, descr)) {
-                        LOG(WARNING) << "Skipping non ord transaction " << tvalue->get_hash().bits().to_hex();
+                        LOG(WARNING) << "Skipping non ord transaction " << tvalue->get_hash().to_hex();
                         continue;
                     }
 
@@ -239,6 +239,7 @@ public:
         auto emulation_success = dynamic_cast<emulator::TransactionEmulator::EmulationSuccess&>(*emulation);
         
         result_ = new Trace();
+        result_->emulated = true;
         result_->workchain = account->workchain;
         result_->transaction_root = emulation_success.transaction;
 
@@ -433,6 +434,7 @@ public:
 
     void create_trace(const TransactionInfo& tx, td::Promise<Trace *> promise) {
         Trace *trace = new Trace();
+        trace->emulated = false;
         trace->workchain = tx.account.workchain;
         trace->transaction_root = tx.root;
         trace->id = tx.initial_msg_hash.value();

@@ -598,6 +598,7 @@ td::Result<std::vector<std::string>> serialize_trace(std::shared_ptr<Trace> root
 
       std::stringstream buffer;
       msgpack::pack(buffer, tx.move_as_ok());
+      msgpack::pack(buffer, current->emulated);
       msgpack::pack(buffer, std::move(child_indices));
       
       serialized_nodes.push_back(buffer.str());
