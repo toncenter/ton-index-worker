@@ -275,7 +275,7 @@ void DbScanner::start_up() {
   auto opts = ton::validator::ValidatorManagerOptions::create(
         ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()},
         ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, 0, ton::RootHash::zero(), ton::FileHash::zero()});
-  opts.write().set_max_open_archive_files(100);
+  //opts.write().set_max_open_archive_files(100);
   auto mode = mode_ == dbs_readonly ? td::DbOpenMode::db_readonly : td::DbOpenMode::db_secondary;
   db_ = td::actor::create_actor<ton::validator::RootDb>("db", td::actor::ActorId<ton::validator::ValidatorManager>(), db_root_, std::move(opts), mode);
 
@@ -292,10 +292,10 @@ void DbScanner::update_last_mc_seqno() {
 }
 
 void DbScanner::set_last_mc_seqno(ton::BlockSeqno mc_seqno) {
-  if (mc_seqno > this->last_known_seqno_) {
+  if (mc_seqno > last_known_seqno_) {
     LOG(DEBUG) << "New masterchain seqno: " << mc_seqno;
   }
-  this->last_known_seqno_ = mc_seqno;
+  last_known_seqno_ = mc_seqno;
 }
 
 void DbScanner::get_last_mc_seqno(td::Promise<ton::BlockSeqno> promise) {
@@ -330,11 +330,6 @@ void DbScanner::alarm() {
   if (db_.empty()) {
     return;
   }
-
-  // td::actor::send_closure(db_caching_, &DbCacheWrapper::print_stats);
-
-  if (!out_of_sync_) {
-    td::actor::send_closure(actor_id(this), &DbScanner::update_last_mc_seqno);
-    td::actor::send_closure(actor_id(this), &DbScanner::catch_up_with_primary);
-  }
+  td::actor::send_closure(actor_id(this), &DbScanner::update_last_mc_seqno);
+  td::actor::send_closure(actor_id(this), &DbScanner::catch_up_with_primary);
 }

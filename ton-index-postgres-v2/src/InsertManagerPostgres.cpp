@@ -1139,7 +1139,7 @@ void InsertBatchPostgres::insert_jetton_wallets(pqxx::work &txn) {
       query << ", ";
     }
     query << "("
-          << jetton_wallet.balance << ","
+          << (jetton_wallet.balance.not_null() ? jetton_wallet.balance->to_dec_string() : "NULL") << ","
           << txn.quote(jetton_wallet.address) << ","
           << txn.quote(jetton_wallet.owner) << ","
           << txn.quote(jetton_wallet.jetton) << ","

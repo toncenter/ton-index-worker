@@ -29,15 +29,16 @@ int main(int argc, char *argv[]) {
   td::int32 stats_timeout = 10;
   std::string db_root;
   td::uint32 last_known_seqno = 0;
-
+  td::uint32 from_seqno = 0;
+  td::uint32 to_seqno = 0;
+  bool force_index = false;
   InsertManagerClickhouse::Credential credential;
 
   std::uint32_t max_active_tasks = 7;
   std::uint32_t max_insert_actors = 12;
   
   QueueState max_queue{200000, 200000, 1000000, 1000000};
-  QueueState batch_size{10000, 10000, 10000, 10000};
-  // QueueState batch_size{200000, 200000, 1000000, 1000000};
+  QueueState batch_size{2000, 2000, 10000, 10000};
   
   td::OptionParser p;
   p.set_description("Parse TON DB and insert data into Clickhouse");
@@ -82,8 +83,22 @@ int main(int argc, char *argv[]) {
     } catch (...) {
       return td::Status::Error(ton::ErrorCode::error, "bad value for --from: not a number");
     }
-    last_known_seqno = v;
+    from_seqno = v;
     return td::Status::OK();
+  });
+  p.add_checked_option('\0', "to", "Masterchain seqno to end indexing", [&](td::Slice value) { 
+    int v;
+    try {
+      v = std::stoi(value.str());
+    } catch (...) {
+      return td::Status::Error(ton::ErrorCode::error, "bad value for --to: not a number");
+    }
+    to_seqno = v;
+    return td::Status::OK();
+  });
+  p.add_option('\0', "force", "Ignore existing seqnos and force reindex", [&]() {
+    force_index = true;
+    LOG(WARNING) << "Force reindexing enabled";
   });
   p.add_checked_option('\0', "max-active-tasks", "Max active reading tasks", [&](td::Slice fname) { 
     int v;
@@ -200,23 +215,23 @@ int main(int argc, char *argv[]) {
   }
 
   td::actor::Scheduler scheduler({threads});
-  scheduler.run_in_context([&] { 
-    insert_manager_ = td::actor::create_actor<InsertManagerClickhouse>("insertmanager", credential); 
-    parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager");
-    db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary);
+  scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerClickhouse>("insertmanager", credential); });
+  scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
+  scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary); });
 
+  scheduler.run_in_context([&] { index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
+    insert_manager_.get(), parse_manager_.get(), from_seqno, to_seqno, force_index, max_active_tasks, max_queue, stats_timeout); 
+  });
+  scheduler.run_in_context([&] { 
     td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::set_parallel_inserts_actors, max_insert_actors);
     td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::set_insert_batch_size, batch_size);
     td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::print_info);
-
-    index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-      insert_manager_.get(), parse_manager_.get(), last_known_seqno, max_active_tasks, max_queue, stats_timeout);
   });
   scheduler.run_in_context([&] { td::actor::send_closure(index_scheduler_, &IndexScheduler::run); });
   
-  while(scheduler.run(1)) {
+  while(scheduler.run(1) && !IndexScheduler::is_finished) {
     // do something
   }
   LOG(INFO) << "Done!";
-  return 0;
+  std::_Exit(0);
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <map>
+#include <variant>
 #include "vm/cells/Cell.h"
 #include "vm/stack.hpp"
 #include "common/refcnt.hpp"
@@ -112,7 +113,7 @@ public:
 template <typename T>
 class InterfaceDetector: public td::actor::Actor {
 public:
-  virtual void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<T> promise) = 0;
+  virtual void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<T> promise) = 0;
   virtual ~InterfaceDetector() = default;
 };
 
@@ -151,10 +152,10 @@ public:
     , insert_manager_(insert_manager) {
   }
 
-  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonMasterData> promise) override {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_master) mutable {
+  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonMasterData> promise) override {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_master) mutable {
       if (code_hash_is_master.is_error()) {
-        td::actor::send_closure(SelfId, &JettonMasterDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+        td::actor::send_closure(SelfId, &JettonMasterDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
         return;
       }
       if (!code_hash_is_master.move_as_ok()) {
@@ -162,7 +163,7 @@ public:
         return;
       }
 
-      td::actor::send_closure(SelfId, &JettonMasterDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &JettonMasterDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
 
     td::actor::send_closure(interface_manager_, &InterfaceManager::check_interface, code_cell->get_hash(), IT_JETTON_MASTER, std::move(P));
@@ -179,13 +180,13 @@ public:
         promise.set_error(td::Status::Error("Account is not active"));
         return;
       }
-      td::actor::send_closure(SelfId, &JettonMasterDetector::detect_impl, address, account_state.code, account_state.data, account_state.last_trans_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &JettonMasterDetector::detect_impl, address, account_state.code, account_state.data, account_state.last_trans_lt, account_state.timestamp, blocks_ds, std::move(promise));
     });
     td::actor::create_actor<FetchAccountFromShard>("fetchaccountfromshard", blocks_ds, address, std::move(R)).release();
   }
 
-  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonMasterData> promise) {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<JettonMasterData> cached_res) mutable {
+  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonMasterData> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<JettonMasterData> cached_res) mutable {
       if (cached_res.is_ok()) {
         auto cached_data = cached_res.move_as_ok();
         if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
@@ -194,12 +195,12 @@ public:
           return;
         }
       }
-      td::actor::send_closure(SelfId, &JettonMasterDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &JettonMasterDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
     storage_.check(address, std::move(P));
   }
 
-  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonMasterData> promise) {
+  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonMasterData> promise) {
     if (code_cell.is_null() || data_cell.is_null()) {
       promise.set_error(td::Status::Error(ErrorCode::DATA_PARSING_ERROR, "Code or data null"));
       return;
@@ -244,6 +245,7 @@ public:
     }
     data.admin_address = admin_address.move_as_ok();
     data.last_transaction_lt = last_tx_lt;
+    data.last_transaction_now = last_tx_now;
     data.data_hash = data_cell->get_hash();
     data.code_boc = td::base64_encode(vm::std_boc_serialize(code_cell).move_as_ok());
     data.data_boc = td::base64_encode(vm::std_boc_serialize(data_cell).move_as_ok());
@@ -345,10 +347,10 @@ public:
     , interface_manager_(interface_manager) {
   }
 
-  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonWalletData> promise) override {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_wallet) mutable {
+  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonWalletData> promise) override {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_wallet) mutable {
       if (code_hash_is_wallet.is_error()) {
-        td::actor::send_closure(SelfId, &JettonWalletDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+        td::actor::send_closure(SelfId, &JettonWalletDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
         return;
       }
       if (!code_hash_is_wallet.move_as_ok()) {
@@ -356,14 +358,14 @@ public:
         return;
       }
 
-      td::actor::send_closure(SelfId, &JettonWalletDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &JettonWalletDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
 
     td::actor::send_closure(interface_manager_, &InterfaceManager::check_interface, code_cell->get_hash(), IT_JETTON_WALLET, std::move(P));
   }
 
-  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonWalletData> promise) {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<JettonWalletData> cached_res) mutable {
+  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonWalletData> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<JettonWalletData> cached_res) mutable {
       if (cached_res.is_ok()) {
         auto cached_data = cached_res.move_as_ok();
         if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
@@ -372,13 +374,13 @@ public:
           return;
         }
       }
-      td::actor::send_closure(SelfId, &JettonWalletDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &JettonWalletDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
 
     storage_.check(address, std::move(P));
   }
 
-  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonWalletData> promise) {
+  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<JettonWalletData> promise) {
     if (code_cell.is_null() || data_cell.is_null()) {
       promise.set_error(td::Status::Error(ErrorCode::DATA_PARSING_ERROR, "Code or data null"));
       return;
@@ -427,6 +429,7 @@ public:
     }
     data.jetton = jetton.move_as_ok();
     data.last_transaction_lt = last_tx_lt;
+    data.last_transaction_now = last_tx_now;
     data.code_hash = code_cell->get_hash();
     data.data_hash = data_cell->get_hash();
 
@@ -463,6 +466,13 @@ public:
     JettonTransfer transfer;
     transfer.transaction_hash = transaction.hash;
     transfer.transaction_lt = transaction.lt;
+    transfer.transaction_now = transaction.now;
+    if (auto* v = std::get_if<schema::TransactionDescr_ord>(&transaction.description)) {
+      transfer.transaction_aborted = v->aborted;
+    } else {
+      transfer.transaction_aborted = 0;
+    }
+
     transfer.query_id = transfer_record.query_id;
     transfer.amount = block::tlb::t_VarUInteger_16.as_integer(transfer_record.amount);
     if (transfer.amount.is_null()) {
@@ -525,6 +535,13 @@ public:
     JettonBurn burn;
     burn.transaction_hash = transaction.hash;
     burn.transaction_lt = transaction.lt;
+    burn.transaction_now = transaction.now;
+    if (auto* v = std::get_if<schema::TransactionDescr_ord>(&transaction.description)) {
+      burn.transaction_aborted = v->aborted;
+    } else {
+      burn.transaction_aborted = 0;
+    }
+
     burn.query_id = burn_record.query_id;
     if (!transaction.in_msg || !transaction.in_msg->source) {
       promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSING_ERROR, "Failed to unpack burn source"));
@@ -618,10 +635,10 @@ public:
     storage_.check(address, std::move(R));
   }
 
-  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTCollectionData> promise) override {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_collection) mutable {
+  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTCollectionData> promise) override {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_collection) mutable {
       if (code_hash_is_collection.is_error()) {
-        td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+        td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
         return;
       }
       if (!code_hash_is_collection.move_as_ok()) {
@@ -629,7 +646,7 @@ public:
         return;
       }
 
-      td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
 
     td::actor::send_closure(interface_manager_, &InterfaceManager::check_interface, code_cell->get_hash(), IT_NFT_COLLECTION, std::move(P));
@@ -642,13 +659,13 @@ private:
         return;
       }
       auto account_state = account_state_r.move_as_ok();
-      td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_impl, address, account_state.code, account_state.data, account_state.last_trans_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_impl, address, account_state.code, account_state.data, account_state.last_trans_lt, account_state.timestamp, blocks_ds, std::move(promise));
     });
     td::actor::create_actor<FetchAccountFromShard>("fetchaccountfromshard", blocks_ds, address, std::move(R)).release();
   }
 
-  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTCollectionData> promise) {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<NFTCollectionData> cached_res) mutable {
+  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTCollectionData> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<NFTCollectionData> cached_res) mutable {
       if (cached_res.is_ok()) {
         auto cached_data = cached_res.move_as_ok();
         if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
@@ -657,13 +674,13 @@ private:
           return;
         }
       }
-      td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &NFTCollectionDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
 
     storage_.check(address, std::move(P));
   }
 
-  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTCollectionData> promise) {
+  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTCollectionData> promise) {
     if (code_cell.is_null() || data_cell.is_null()) {
       promise.set_error(td::Status::Error(ErrorCode::DATA_PARSING_ERROR, "Code or data null"));
       return;
@@ -708,6 +725,7 @@ private:
     }
     data.owner_address = owner_address.move_as_ok();
     data.last_transaction_lt = last_tx_lt;
+    data.last_transaction_now = last_tx_now;
     data.data_hash = data_cell->get_hash();
     data.code_boc = td::base64_encode(vm::std_boc_serialize(code_cell).move_as_ok());
     data.data_boc = td::base64_encode(vm::std_boc_serialize(data_cell).move_as_ok());
@@ -745,10 +763,10 @@ public:
     , collection_detector_(collection_detector) {
   }
 
-  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTItemData> promise) override {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_collection) mutable {
+  void detect(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTItemData> promise) override {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<bool> code_hash_is_collection) mutable {
       if (code_hash_is_collection.is_error()) {
-        td::actor::send_closure(SelfId, &NFTItemDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+        td::actor::send_closure(SelfId, &NFTItemDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
         return;
       }
       if (!code_hash_is_collection.move_as_ok()) {
@@ -756,7 +774,7 @@ public:
         return;
       }
 
-      td::actor::send_closure(SelfId, &NFTItemDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &NFTItemDetector::detect_continue, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
 
     td::actor::send_closure(interface_manager_, &InterfaceManager::check_interface, code_cell->get_hash(), IT_NFT_ITEM, std::move(P));
@@ -788,6 +806,13 @@ public:
     NFTTransfer transfer;
     transfer.transaction_hash = transaction.hash;
     transfer.transaction_lt = transaction.lt;
+    transfer.transaction_now = transaction.now;
+    if (auto* v = std::get_if<schema::TransactionDescr_ord>(&transaction.description)) {
+      transfer.transaction_aborted = v->aborted;
+    } else {
+      transfer.transaction_aborted = 0;
+    }
+
     transfer.query_id = transfer_record.query_id;
     transfer.nft_item = transaction.account;
     if (!transaction.in_msg.has_value() || !transaction.in_msg.value().source) {
@@ -821,8 +846,8 @@ public:
   }
 
 private:
-  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTItemData> promise) {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, blocks_ds, promise = std::move(promise)](td::Result<NFTItemData> cached_res) mutable {
+  void detect_continue(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTItemData> promise) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), this, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, promise = std::move(promise)](td::Result<NFTItemData> cached_res) mutable {
       if (cached_res.is_ok()) {
         auto cached_data = cached_res.move_as_ok();
         if ((data_cell->get_hash() == cached_data.data_hash && code_cell->get_hash() == cached_data.code_hash) 
@@ -831,13 +856,13 @@ private:
           return;
         }
       }
-      td::actor::send_closure(SelfId, &NFTItemDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, blocks_ds, std::move(promise));
+      td::actor::send_closure(SelfId, &NFTItemDetector::detect_impl, address, code_cell, data_cell, last_tx_lt, last_tx_now, blocks_ds, std::move(promise));
     });
 
     storage_.check(address, std::move(P));
   }
 
-  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, const MasterchainBlockDataState& blocks_ds, td::Promise<NFTItemData> promise) {
+  void detect_impl(block::StdAddress address, td::Ref<vm::Cell> code_cell, td::Ref<vm::Cell> data_cell, uint64_t last_tx_lt, uint32_t last_tx_now,  const MasterchainBlockDataState& blocks_ds, td::Promise<NFTItemData> promise) {
     if (code_cell.is_null() || data_cell.is_null()) {
       promise.set_error(td::Status::Error(ErrorCode::DATA_PARSING_ERROR, "Code or data null"));
       return;
@@ -890,6 +915,7 @@ private:
     }
     data.owner_address = owner_address.move_as_ok();
     data.last_transaction_lt = last_tx_lt;
+    data.last_transaction_now = last_tx_now;
     data.code_hash = code_cell->get_hash();
     data.data_hash = data_cell->get_hash();
     

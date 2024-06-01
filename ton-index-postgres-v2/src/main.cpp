@@ -9,6 +9,7 @@
 #include "InsertManagerPostgres.h"
 #include "DataParser.h"
 #include "DbScanner.h"
+#include "TraceAssembler.h"
 #include "EventProcessor.h"
 #include "IndexScheduler.h"
 
@@ -21,7 +22,6 @@ int main(int argc, char *argv[]) {
 
   td::actor::ActorOwn<DbScanner> db_scanner_;
   td::actor::ActorOwn<ParseManager> parse_manager_;
-  td::actor::ActorOwn<EventProcessor> event_processor_;
   td::actor::ActorOwn<InsertManagerPostgres> insert_manager_;
   td::actor::ActorOwn<IndexScheduler> index_scheduler_;
 

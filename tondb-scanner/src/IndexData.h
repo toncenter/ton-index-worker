@@ -268,6 +268,8 @@ struct Block {
 
 struct MasterchainBlockShard {
   uint32_t mc_seqno;
+  uint64_t mc_block_start_lt;
+  int32_t mc_block_gen_utime;
   
   int32_t workchain;
   int64_t shard;
@@ -287,6 +289,7 @@ struct AccountState {
   td::Ref<vm::Cell> data;
   td::optional<std::string> data_hash;
   uint64_t last_trans_lt;     // in "nonexist" case it is lt of block, not tx. TODO: fix it
+  uint32_t last_trans_now;
 };
 
 }  // namespace schema
@@ -301,6 +304,7 @@ struct JettonMasterData {
   vm::CellHash data_hash;
   vm::CellHash code_hash;
   uint64_t last_transaction_lt;
+  uint32_t last_transaction_now;
   std::string code_boc;
   std::string data_boc;
 };
@@ -311,6 +315,7 @@ struct JettonWalletData {
   std::string owner;
   std::string jetton;
   uint64_t last_transaction_lt;
+  uint32_t last_transaction_now;
   vm::CellHash code_hash;
   vm::CellHash data_hash;
 };
@@ -318,11 +323,14 @@ struct JettonWalletData {
 struct JettonTransfer {
   td::Bits256 transaction_hash;
   uint64_t transaction_lt;
+  uint32_t transaction_now;
+  bool transaction_aborted;
   uint64_t query_id;
   td::RefInt256 amount;
   std::string source;
   std::string destination;
   std::string jetton_wallet;
+  std::string jetton_master;  // ignore
   std::string response_destination;
   td::Ref<vm::Cell> custom_payload;
   td::RefInt256 forward_ton_amount;
@@ -332,9 +340,12 @@ struct JettonTransfer {
 struct JettonBurn {
   td::Bits256 transaction_hash;
   uint64_t transaction_lt;
+  uint32_t transaction_now;
+  bool transaction_aborted;
   uint64_t query_id;
   std::string owner;
   std::string jetton_wallet;
+  std::string jetton_master;  // ignore
   td::RefInt256 amount;
   std::string response_destination;
   td::Ref<vm::Cell> custom_payload;
@@ -348,6 +359,7 @@ struct NFTCollectionData {
   vm::CellHash data_hash;
   vm::CellHash code_hash;
   uint64_t last_transaction_lt;
+  uint32_t last_transaction_now;
   std::string code_boc;
   std::string data_boc;
 };
@@ -360,6 +372,7 @@ struct NFTItemData {
   std::string owner_address;
   td::optional<std::map<std::string, std::string>> content;
   uint64_t last_transaction_lt;
+  uint32_t last_transaction_now;
   vm::CellHash code_hash;
   vm::CellHash data_hash;
 };
@@ -367,8 +380,12 @@ struct NFTItemData {
 struct NFTTransfer {
   td::Bits256 transaction_hash;
   uint64_t transaction_lt;
+  uint32_t transaction_now;
+  bool transaction_aborted;
   uint64_t query_id;
   block::StdAddress nft_item;
+  td::RefInt256 nft_item_index;  // ignore
+  std::string nft_collection;  // ignore
   std::string old_owner;
   std::string new_owner;
   std::string response_destination;

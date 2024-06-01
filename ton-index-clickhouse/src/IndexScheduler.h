@@ -23,6 +23,9 @@ private:
   std::uint32_t max_active_tasks_{32};
   std::int32_t last_known_seqno_{0};
   std::int32_t last_indexed_seqno_{0};
+  std::int32_t from_seqno_{0};
+  std::int32_t to_seqno_{0};
+  bool force_index_{false};
   bool out_of_sync_{true};
 
   std::double_t avg_tps_{0};
@@ -33,18 +36,19 @@ private:
 
   std::int32_t stats_timeout_{10};
   td::Timestamp next_print_stats_;
-  td::Timestamp next_catch_up_;
 public:
   IndexScheduler(td::actor::ActorId<DbScanner> db_scanner, td::actor::ActorId<InsertManagerInterface> insert_manager,
-      td::actor::ActorId<ParseManager> parse_manager, std::int32_t last_known_seqno = 0,
+      td::actor::ActorId<ParseManager> parse_manager, std::int32_t from_seqno = 0, std::int32_t to_seqno = 0, bool force_index = false,
       std::uint32_t max_active_tasks = 32, QueueState max_queue = QueueState{30000, 30000, 500000, 500000}, std::int32_t stats_timeout = 10)
     : db_scanner_(db_scanner), insert_manager_(insert_manager), parse_manager_(parse_manager), 
-      last_known_seqno_(last_known_seqno), max_active_tasks_(max_active_tasks),
+      from_seqno_(from_seqno), to_seqno_(to_seqno), force_index_(force_index), max_active_tasks_(max_active_tasks),
       max_queue_(std::move(max_queue)), stats_timeout_(stats_timeout) {};
 
   void start_up() override;
   void alarm() override;
   void run();
+
+  static std::atomic<bool> is_finished;
 private:
   void schedule_next_seqnos();
 
