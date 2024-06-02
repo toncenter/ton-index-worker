@@ -577,7 +577,7 @@ td::Result<std::vector<std::string>> serialize_trace(std::shared_ptr<Trace> root
   std::vector<std::string> serialized_nodes;
   std::queue<Trace *> queue;
   std::unordered_map<Trace*, size_t> node_indices;
-  size_t current_index = 1;
+  uint16_t current_index = 1;
 
   queue.push(root.get());
 
@@ -590,7 +590,7 @@ td::Result<std::vector<std::string>> serialize_trace(std::shared_ptr<Trace> root
         return tx.move_as_error_prefix("Failed to parse transaction: ");
       }
       
-      std::vector<size_t> child_indices;
+      std::vector<uint16_t> child_indices;
       for (Trace *child : current->children) {
         queue.push(child);
         child_indices.push_back(current_index++);
