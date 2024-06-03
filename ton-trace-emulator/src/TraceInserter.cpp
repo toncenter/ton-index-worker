@@ -5,6 +5,7 @@ void TraceInserter::start_up() {
     auto serialized_r = serialize_trace(trace_);
     if (serialized_r.is_error()) {
         promise_.set_error(serialized_r.move_as_error_prefix("Failed to serialize trace: "));
+        stop();
         return;
     }
     auto serialized = serialized_r.move_as_ok();
@@ -28,4 +29,6 @@ void TraceInserter::start_up() {
     } catch (const sw::redis::Error &err) {
         promise_.set_error(td::Status::Error("Redis error: " + std::string(err.what())));
     }
+
+    stop();
 }

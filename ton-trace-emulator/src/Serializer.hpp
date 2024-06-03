@@ -12,7 +12,7 @@ namespace msgpack {
     struct pack<block::StdAddress> {
       template <typename Stream>
       msgpack::packer<Stream>& operator()(msgpack::packer<Stream>& o, const block::StdAddress& v) const {
-        std::string addr = v.workchain + ":" + v.addr.to_hex();
+        std::string addr = std::to_string(v.workchain) + ":" + v.addr.to_hex();
         o.pack(addr);
         return o;
       }
@@ -233,6 +233,14 @@ struct Transaction {
   TransactionDescr description;
 
   MSGPACK_DEFINE(hash, account, lt, prev_trans_hash, prev_trans_lt, now, orig_status, end_status, in_msg, out_msgs, total_fees, account_state_hash_before, account_state_hash_after, description);
+};
+
+struct TraceNode {
+  Transaction transaction;
+  bool emulated;
+  std::vector<uint32_t> children;
+
+  MSGPACK_DEFINE(transaction, emulated, children);
 };
 
 td::Result<Message> parse_message(td::Ref<vm::Cell> msg_cell) {
@@ -577,7 +585,7 @@ td::Result<std::vector<std::string>> serialize_trace(std::shared_ptr<Trace> root
   std::vector<std::string> serialized_nodes;
   std::queue<Trace *> queue;
   std::unordered_map<Trace*, size_t> node_indices;
-  uint16_t current_index = 1;
+  uint32_t current_index = 1;
 
   queue.push(root.get());
 
@@ -590,16 +598,16 @@ td::Result<std::vector<std::string>> serialize_trace(std::shared_ptr<Trace> root
         return tx.move_as_error_prefix("Failed to parse transaction: ");
       }
       
-      std::vector<uint16_t> child_indices;
+      std::vector<uint32_t> child_indices;
       for (Trace *child : current->children) {
         queue.push(child);
         child_indices.push_back(current_index++);
       }
 
+      TraceNode node{tx.move_as_ok(), current->emulated, child_indices};
+
       std::stringstream buffer;
-      msgpack::pack(buffer, tx.move_as_ok());
-      msgpack::pack(buffer, current->emulated);
-      msgpack::pack(buffer, std::move(child_indices));
+      msgpack::pack(buffer, std::move(node));
       
       serialized_nodes.push_back(buffer.str());
   }
