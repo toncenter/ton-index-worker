@@ -239,6 +239,7 @@ public:
         auto emulation_success = dynamic_cast<emulator::TransactionEmulator::EmulationSuccess&>(*emulation);
         
         result_ = new Trace();
+        result_->node_id = in_msg_->get_hash().bits();
         result_->emulated = true;
         result_->workchain = account->workchain;
         result_->transaction_root = emulation_success.transaction;
@@ -438,6 +439,7 @@ public:
         trace->workchain = tx.account.workchain;
         trace->transaction_root = tx.root;
         trace->id = tx.initial_msg_hash.value();
+        trace->node_id = tx.in_msg_hash;
 
         td::MultiPromise mp;
         auto ig = mp.init_guard();

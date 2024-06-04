@@ -21,7 +21,9 @@ namespace msgpack {
     template <>
     struct convert<block::StdAddress> {
       msgpack::object const& operator()(msgpack::object const& o, block::StdAddress& v) const {
-        throw std::runtime_error("Deserialization of block::StdAddress is not supported.");
+        if (o.type != msgpack::type::STR) throw msgpack::type_error();
+        std::string addr = o.as<std::string>();
+        if (!v.parse_addr(addr)) throw std::runtime_error("Failed to deserialize block::StdAddress");
         return o;
       }
     };
@@ -38,7 +40,9 @@ namespace msgpack {
     template <>
     struct convert<td::Bits256> {
       msgpack::object const& operator()(msgpack::object const& o, td::Bits256& v) const {
-        throw std::runtime_error("Deserialization of td::Bits256 is not supported.");
+        if (o.type != msgpack::type::STR) throw msgpack::type_error();
+        std::string hex = o.as<std::string>();
+        if (v.from_hex(hex) < 0) throw std::runtime_error("Failed to deserialize td::Bits256");
         return o;
       }
     };
@@ -238,9 +242,8 @@ struct Transaction {
 struct TraceNode {
   Transaction transaction;
   bool emulated;
-  std::vector<uint32_t> children;
 
-  MSGPACK_DEFINE(transaction, emulated, children);
+  MSGPACK_DEFINE(transaction, emulated);
 };
 
 td::Result<Message> parse_message(td::Ref<vm::Cell> msg_cell) {
@@ -577,39 +580,4 @@ td::Result<Transaction> parse_tx(td::Ref<vm::Cell> root, ton::WorkchainId workch
   auto descr_cs = vm::load_cell_slice(trans.description);
   TRY_RESULT_ASSIGN(schema_tx.description, process_transaction_descr(descr_cs));
   return schema_tx;
-}
-
-td::Result<std::vector<std::string>> serialize_trace(std::shared_ptr<Trace> root) {
-  if (!root) return td::Status::Error("Root is null");
-
-  std::vector<std::string> serialized_nodes;
-  std::queue<Trace *> queue;
-  std::unordered_map<Trace*, size_t> node_indices;
-  uint32_t current_index = 1;
-
-  queue.push(root.get());
-
-  while (!queue.empty()) {
-      Trace* current = queue.front();
-      queue.pop();
-
-      auto tx = parse_tx(current->transaction_root, current->workchain);
-      if (tx.is_error()) {
-        return tx.move_as_error_prefix("Failed to parse transaction: ");
-      }
-      
-      std::vector<uint32_t> child_indices;
-      for (Trace *child : current->children) {
-        queue.push(child);
-        child_indices.push_back(current_index++);
-      }
-
-      TraceNode node{tx.move_as_ok(), current->emulated, child_indices};
-
-      std::stringstream buffer;
-      msgpack::pack(buffer, std::move(node));
-      
-      serialized_nodes.push_back(buffer.str());
-  }
-  return serialized_nodes;
 }

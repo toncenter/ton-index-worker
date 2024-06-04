@@ -20,4 +20,5 @@ public:
     }
 
     void start_up() override;
+    void delete_db_subtree(std::string key);
 };

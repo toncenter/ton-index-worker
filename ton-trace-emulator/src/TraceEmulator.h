@@ -6,7 +6,8 @@
 using TraceId = td::Bits256;
 
 struct Trace {
-    TraceId id;
+    TraceId id; // hash of initial in msg
+    td::Bits256 node_id; // hash of cur tx in msg
     ton::WorkchainId workchain;
     std::vector<Trace *> children;
     td::Ref<vm::Cell> transaction_root;
