@@ -264,7 +264,6 @@ void InsertManagerClickhouse::start_up() {
                     << "code_hash FixedString(44),"
                     << "data_hash FixedString(44)"
                     << ") ENGINE ReplacingMergeTree(last_transaction_lt) PRIMARY KEY(collection_address, nft_index) ORDER BY (collection_address, nft_index);\n";
-            LOG(WARNING) << builder.as_cslice().str();
             client.Execute(builder.as_cslice().str());
             LOG(INFO) << "Table nft_items created";
         }
@@ -1214,8 +1213,8 @@ void InsertBatchClickhouse::insert_account_states(clickhouse::Client &client) {
     auto code_hash_col = std::make_shared<ColumnNullableT<ColumnFixedString>>(44);
     auto data_hash_col = std::make_shared<ColumnNullableT<ColumnFixedString>>(44);
     auto last_trans_lt_col = std::make_shared<ColumnUInt64>();
-    auto code_boc_col = std::make_shared<ColumnNullableT<ColumnString>>();
-    auto data_boc_col = std::make_shared<ColumnNullableT<ColumnString>>();
+    // auto code_boc_col = std::make_shared<ColumnNullableT<ColumnString>>();
+    // auto data_boc_col = std::make_shared<ColumnNullableT<ColumnString>>();
 
     for(const auto& task_ : insert_tasks_) {
         for (const auto& state_: task_.parsed_block_->account_states_) {
@@ -1229,28 +1228,28 @@ void InsertBatchClickhouse::insert_account_states(clickhouse::Client &client) {
             data_hash_col->Append(TO_STD_OPTIONAL(state_.data_hash));
             last_trans_lt_col->Append(state_.last_trans_lt);
 
-            if (state_.code.not_null()) {
-                auto code_res = vm::std_boc_serialize(state_.code);
-                if(code_res.is_error()) {
-                    LOG(ERROR) << "Failed to convert code boc";
-                    code_boc_col->Append(std::nullopt);
-                } else {
-                    code_boc_col->Append(td::base64_encode(code_res.move_as_ok().as_slice().str()));
-                }
-            } else {
-                code_boc_col->Append(std::nullopt);
-            }
-            if (state_.data.not_null()) {
-                auto data_res = vm::std_boc_serialize(state_.data);
-                if(data_res.is_error()) {
-                    LOG(ERROR) << "Failed to convert data boc";
-                    data_boc_col->Append(std::nullopt);
-                } else {
-                    data_boc_col->Append(td::base64_encode(data_res.move_as_ok().as_slice().str()));
-                }
-            } else {
-                data_boc_col->Append(std::nullopt);
-            }
+            // if (state_.code.not_null()) {
+            //     auto code_res = vm::std_boc_serialize(state_.code);
+            //     if(code_res.is_error()) {
+            //         LOG(ERROR) << "Failed to convert code boc";
+            //         code_boc_col->Append(std::nullopt);
+            //     } else {
+            //         code_boc_col->Append(td::base64_encode(code_res.move_as_ok().as_slice().str()));
+            //     }
+            // } else {
+            //     code_boc_col->Append(std::nullopt);
+            // }
+            // if (state_.data.not_null()) {
+            //     auto data_res = vm::std_boc_serialize(state_.data);
+            //     if(data_res.is_error()) {
+            //         LOG(ERROR) << "Failed to convert data boc";
+            //         data_boc_col->Append(std::nullopt);
+            //     } else {
+            //         data_boc_col->Append(td::base64_encode(data_res.move_as_ok().as_slice().str()));
+            //     }
+            // } else {
+            //     data_boc_col->Append(std::nullopt);
+            // }
         }
     }
 
@@ -1273,8 +1272,8 @@ void InsertBatchClickhouse::insert_account_states(clickhouse::Client &client) {
     block_latest.AppendColumn("code_hash", code_hash_col);
     block_latest.AppendColumn("data_hash", data_hash_col);
     block_latest.AppendColumn("last_trans_lt", last_trans_lt_col);
-    block_latest.AppendColumn("code_boc", code_boc_col);
-    block_latest.AppendColumn("data_boc", data_boc_col);
+    // block_latest.AppendColumn("code_boc", code_boc_col);
+    // block_latest.AppendColumn("data_boc", data_boc_col);
 
     client.Insert("account_states", block);
     client.Insert("latest_account_states", block_latest);
