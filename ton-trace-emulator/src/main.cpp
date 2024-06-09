@@ -7,7 +7,7 @@
 #include "crypto/vm/cp0.h"
 
 #include "DbScanner.h"
-#include "EventProcessor.h"
+#include "TraceScheduler.h"
 #include "TraceInserter.h"
 
 
@@ -21,6 +21,8 @@ int main(int argc, char *argv[]) {
   std::string db_root;
   td::uint32 threads = 7;
   
+  std::string global_config_path;
+  std::string inet_addr;
   
   td::OptionParser p;
   p.set_description("Emulate TON traces");
@@ -46,8 +48,16 @@ int main(int argc, char *argv[]) {
     return td::Status::OK();
   });
 
-  p.add_option('\0', "--redis", "Redis URI (default: 'tcp://127.0.0.1:6379')", [&](td::Slice fname) { 
+  p.add_option('\0', "redis", "Redis URI (default: 'tcp://127.0.0.1:6379')", [&](td::Slice fname) { 
     TraceInserter::redis_uri = fname.str();
+  });
+
+  p.add_option('\0', "global-config", "Path to global config json file (for listening overlay)", [&](td::Slice fname) { 
+    global_config_path = fname.str();
+  });
+
+  p.add_option('\0', "addr", "ip:port of this machine (for listening overlay)", [&](td::Slice fname) { 
+    inet_addr = fname.str();
   });
 
 
@@ -62,13 +72,17 @@ int main(int argc, char *argv[]) {
     std::_Exit(2);
   }
 
+  if (global_config_path.empty() ^ inet_addr.empty()) {
+    std::cerr << "'--global-config' must be present with '--addr'" << std::endl;
+    std::_Exit(2);
+  }
+
   td::actor::Scheduler scheduler({threads});
   td::actor::ActorOwn<DbScanner> db_scanner;
 
   scheduler.run_in_context([&] { 
     db_scanner = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_readonly);
-    td::actor::create_actor<TraceEmulatorScheduler>("integritychecker", 
-                          db_scanner.get()).release();
+    td::actor::create_actor<TraceEmulatorScheduler>("integritychecker", db_scanner.get(), global_config_path, inet_addr).release();
   });
   
   scheduler.run();

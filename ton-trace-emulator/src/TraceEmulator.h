@@ -1,7 +1,9 @@
 #pragma once
 #include <any>
-#include "td/actor/actor.h"
+#include <td/actor/actor.h>
+#include <emulator/transaction-emulator.h>
 #include "DbScanner.h"
+
 
 using TraceId = td::Bits256;
 
@@ -55,63 +57,45 @@ struct Trace {
     }
 };
 
-struct OutMsgInfo {
-    td::Bits256 hash;
-    block::StdAddress destination;
-    td::Ref<vm::Cell> root;
+struct BitArrayHasher {
+    std::size_t operator()(const td::Bits256& k) const {
+        std::size_t seed = 0;
+        for(const auto& el : k.as_array()) {
+            seed ^= std::hash<td::uint8>{}(el) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
 };
 
-
-struct TransactionInfo {
-    block::StdAddress account;
-    td::Bits256 hash;
-    ton::LogicalTime lt;
-    td::Ref<vm::Cell> root;
-    td::Bits256 in_msg_hash;
-    bool is_first;
-    std::vector<OutMsgInfo> out_msgs;
-    std::optional<td::Bits256> initial_msg_hash{}; // hash of initial transaction in block that caused this transaction. 
-                                                 // This is not necessarily ext in message, because ext in could happen in prev block.
+struct AddressHasher {
+    std::size_t operator()(const block::StdAddress& addr) const {
+        return std::hash<td::uint32>{}(addr.workchain) ^ BitArrayHasher()(addr.addr);
+    }
 };
 
-class TraceEmulatorScheduler : public td::actor::Actor {
-  private: 
-    td::actor::ActorId<DbScanner> db_scanner_;
-    std::uint32_t stats_timeout_;
+class TraceEmulator: public td::actor::Actor {
+private:
+    std::shared_ptr<emulator::TransactionEmulator> emulator_;
+    std::vector<td::Ref<vm::Cell>> shard_states_;
+    std::unordered_map<block::StdAddress, std::shared_ptr<block::Account>, AddressHasher> emulated_accounts_;
+    block::StdAddress account_addr_;
+    td::Ref<vm::Cell> in_msg_;
+    bool is_external_{false};
+    td::Promise<Trace *> promise_;
+    size_t depth_{20};
+    size_t pending_{0};
+    Trace *result_;
 
-    ton::BlockSeqno last_known_seqno_{0};
+    void set_error(td::Status error);
+    std::unique_ptr<block::Account> unpack_account(vm::AugmentedDictionary& accounts_dict);
+    void emulate_transaction(std::unique_ptr<block::Account> account);
+    void trace_emulated(Trace *trace, size_t ind);
+public:
+    TraceEmulator(std::shared_ptr<emulator::TransactionEmulator> emulator, std::vector<td::Ref<vm::Cell>> shard_states, 
+                  std::unordered_map<block::StdAddress, std::shared_ptr<block::Account>, AddressHasher> emulated_accounts, td::Ref<vm::Cell> in_msg, size_t depth, td::Promise<Trace *> promise)
+        : emulator_(std::move(emulator)), shard_states_(shard_states), emulated_accounts_(emulated_accounts), 
+          in_msg_(std::move(in_msg)), depth_(depth), promise_(std::move(promise)) {
+    }
 
-    std::queue<std::uint32_t> queued_seqnos_;
-    td::Timestamp next_print_stats_;
-    std::unordered_set<std::uint32_t> seqnos_fetching_;
-    std::unordered_set<std::uint32_t> seqnos_emulating_;
-    std::set<std::uint32_t> seqnos_processed_;
-    std::queue<std::pair<std::uint32_t, MasterchainBlockDataState>> blocks_to_emulate_;
-    std::uint32_t blocks_to_emulate_queue_max_size_{1000};
-
-    // td::Timestamp last_tps_calc_ts_ = td::Timestamp::now();
-    // uint32_t last_tps_calc_processed_count_{0};
-    // float tps_{0};
-
-  public:
-    TraceEmulatorScheduler(td::actor::ActorId<DbScanner> db_scanner, std::uint32_t stats_timeout = 60) :
-        db_scanner_(db_scanner), stats_timeout_(stats_timeout) {};
-    virtual ~TraceEmulatorScheduler() = default;
-
-    virtual void start_up() override;
-
-  
-    void got_last_mc_seqno(ton::BlockSeqno last_known_seqno);
-
-    void fetch_error(std::uint32_t seqno, td::Status error);
-
-    void seqno_fetched(std::uint32_t seqno, MasterchainBlockDataState mc_data_state);
-
-    void emulate_mc_shard(MasterchainBlockDataState mc_data_state);
-
-    void parse_error(std::uint32_t seqno, td::Status error);
-
-    void block_parsed(ton::BlockId blk_id, std::vector<TransactionInfo> txs);
-
-    void alarm();
+    void start_up() override;
 };

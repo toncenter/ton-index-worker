@@ -4,6 +4,9 @@ add_executable(ton-trace-emulator
     src/main.cpp
     src/TraceEmulator.cpp
     src/TraceInserter.cpp
+    src/OverlayListener.cpp
+    src/BlockEmulator.cpp
+    src/TraceScheduler.cpp
 )
 
 target_include_directories(ton-trace-emulator
