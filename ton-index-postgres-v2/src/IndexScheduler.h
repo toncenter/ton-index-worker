@@ -21,6 +21,7 @@ private:
   td::actor::ActorId<ParseManager> parse_manager_;
   td::actor::ActorOwn<EventProcessor> event_processor_;
   td::actor::ActorOwn<TraceAssembler> trace_assembler_;
+  std::shared_ptr<td::Destructor> watcher_;
 
   std::uint32_t max_active_tasks_{32};
   std::int32_t last_known_seqno_{0};
@@ -41,16 +42,15 @@ private:
 public:
   IndexScheduler(td::actor::ActorId<DbScanner> db_scanner, td::actor::ActorId<InsertManagerInterface> insert_manager,
       td::actor::ActorId<ParseManager> parse_manager, std::int32_t from_seqno = 0, std::int32_t to_seqno = 0, bool force_index = false,
-      std::uint32_t max_active_tasks = 32, QueueState max_queue = QueueState{30000, 30000, 500000, 500000}, std::int32_t stats_timeout = 10)
+      std::uint32_t max_active_tasks = 32, QueueState max_queue = QueueState{30000, 30000, 500000, 500000}, std::int32_t stats_timeout = 10,
+      std::shared_ptr<td::Destructor> watcher = nullptr)
     : db_scanner_(db_scanner), insert_manager_(insert_manager), parse_manager_(parse_manager), 
       from_seqno_(from_seqno), to_seqno_(to_seqno), force_index_(force_index), max_active_tasks_(max_active_tasks),
-      max_queue_(std::move(max_queue)), stats_timeout_(stats_timeout) {};
+      max_queue_(std::move(max_queue)), stats_timeout_(stats_timeout), watcher_(watcher) {};
 
   void start_up() override;
   void alarm() override;
   void run();
-
-  static std::atomic<bool> is_finished;
 private:
   void schedule_next_seqnos();
 

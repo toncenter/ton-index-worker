@@ -214,13 +214,17 @@ int main(int argc, char *argv[]) {
     std::_Exit(2);
   }
 
+  auto watcher = td::create_shared_destructor([] {
+    td::actor::SchedulerContext::get()->stop();
+  });
+
   td::actor::Scheduler scheduler({threads});
   scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerClickhouse>("insertmanager", credential); });
   scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
   scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary); });
 
-  scheduler.run_in_context([&] { index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-    insert_manager_.get(), parse_manager_.get(), from_seqno, to_seqno, force_index, max_active_tasks, max_queue, stats_timeout); 
+  scheduler.run_in_context([&, watcher = std::move(watcher)] { index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
+    insert_manager_.get(), parse_manager_.get(), from_seqno, to_seqno, force_index, max_active_tasks, max_queue, stats_timeout, watcher); 
   });
   scheduler.run_in_context([&] { 
     td::actor::send_closure(insert_manager_, &InsertManagerClickhouse::set_parallel_inserts_actors, max_insert_actors);
@@ -229,9 +233,9 @@ int main(int argc, char *argv[]) {
   });
   scheduler.run_in_context([&] { td::actor::send_closure(index_scheduler_, &IndexScheduler::run); });
   
-  while(scheduler.run(1) && !IndexScheduler::is_finished) {
+  while(scheduler.run(1)) {
     // do something
   }
   LOG(INFO) << "Done!";
-  std::_Exit(0);
+  return 0;
 }

@@ -4,8 +4,6 @@
 #include <iostream>
 
 
-std::atomic<bool> IndexScheduler::is_finished{false};
-
 void IndexScheduler::start_up() {
     event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
     trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler");
@@ -247,6 +245,7 @@ void IndexScheduler::schedule_next_seqnos() {
     }
 
     if(to_seqno_ > 0 && last_known_seqno_ > to_seqno_ && queued_seqnos_.empty()) {
-        is_finished.store(true);
+        stop();
+        return;
     }
 }
