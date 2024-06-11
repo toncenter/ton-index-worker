@@ -63,7 +63,7 @@ void TraceEmulatorScheduler::seqno_fetched(std::uint32_t seqno, MasterchainBlock
     td::actor::create_actor<McBlockEmulator>("McBlockEmulator", mc_data_state, std::move(P)).release();
 }
 
-int seqno = 37786481;
+// int seqno = 37786481;
 
 void TraceEmulatorScheduler::alarm() {
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<ton::BlockSeqno> R){
@@ -72,8 +72,8 @@ void TraceEmulatorScheduler::alarm() {
             std::_Exit(2);
             return;
         }
-        // td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, R.move_as_ok());
-        td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, seqno++); // for debugging
+        td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, R.move_as_ok());
+        // td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, seqno++); // for debugging
     });
     td::actor::send_closure(db_scanner_, &DbScanner::get_last_mc_seqno, std::move(P));
 
