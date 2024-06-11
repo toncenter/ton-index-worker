@@ -11,6 +11,10 @@ void TraceInserter::start_up() {
             Trace& current = queue.front();
             queue.pop();
 
+            for (auto child : current.children) {
+                queue.push(*child);
+            }
+
             auto tx_r = parse_tx(current.transaction_root, current.workchain);
             if (tx_r.is_error()) {
                 promise_.set_error(tx_r.move_as_error_prefix("Failed to parse transaction: "));
