@@ -676,7 +676,7 @@ void InsertBatchPostgres::insert_transactions(pqxx::work &txn) {
               << blk.shard << ","
               << blk.seqno << ","
               << TO_SQL_OPTIONAL(blk.mc_block_seqno) << ","
-              << "NULL" << "," // TODO: add traces
+              << txn.quote(td::base64_encode(transaction.trace_id.as_slice())) << ","
               << txn.quote(td::base64_encode(transaction.prev_trans_hash.as_slice())) << ","
               << transaction.prev_trans_lt << ","
               << transaction.now << ","
