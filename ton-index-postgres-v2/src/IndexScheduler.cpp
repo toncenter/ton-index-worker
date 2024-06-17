@@ -6,7 +6,7 @@
 
 void IndexScheduler::start_up() {
     event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
-    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler");
+    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler", from_seqno_);
 }
 
 std::string get_time_string(double seconds) {
@@ -74,11 +74,19 @@ void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> 
         LOG(ERROR) << "Error reading existing seqnos: " << R.move_as_error();
         return;
     }
-
+    std::int32_t max_seqno = 0;
     for (auto value : R.move_as_ok()) {
+        if (value > max_seqno) {
+            max_seqno = value;
+        }
         existing_seqnos_.insert(value);
     }
     LOG(INFO) << "Found " << existing_seqnos_.size() << " existing seqnos";
+
+    // start loop
+    if (max_seqno > 0) {
+        td::actor::send_closure(trace_assembler_, &TraceAssembler::update_expected_seqno, max_seqno + 1);
+    }
     alarm_timestamp() = td::Timestamp::in(1.0);
 }
 
@@ -199,7 +207,8 @@ void IndexScheduler::print_stats() {
        << "\tQ[" << cur_queue_state_.mc_blocks_ << "M, " 
        << cur_queue_state_.blocks_ << "b, " 
        << cur_queue_state_.txs_ << "t, " 
-       << cur_queue_state_.msgs_ << "m]";
+       << cur_queue_state_.msgs_ << "m, "
+       << cur_queue_state_.traces_ << "T]";
     LOG(INFO) << sb.as_cslice().str();
 }
 
@@ -233,7 +242,9 @@ void IndexScheduler::schedule_next_seqnos() {
         schedule_seqno(seqno);
     }
 
-    if(to_seqno_ > 0 && last_known_seqno_ > to_seqno_ && queued_seqnos_.empty()) {
+    if(to_seqno_ > 0 && last_known_seqno_ > to_seqno_ 
+       && queued_seqnos_.empty() && processing_seqnos_.empty()
+       && cur_queue_state_.blocks_ == 0) {
         stop();
         return;
     }

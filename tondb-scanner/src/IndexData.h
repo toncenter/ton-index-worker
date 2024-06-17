@@ -220,6 +220,7 @@ struct Transaction {
   td::Bits256 account_state_hash_before;
   td::Bits256 account_state_hash_after;
 
+  td::Bits256 trace_id;
   TransactionDescr description;
 };
 
@@ -290,6 +291,33 @@ struct AccountState {
   td::optional<std::string> data_hash;
   uint64_t last_trans_lt;     // in "nonexist" case it is lt of block, not tx. TODO: fix it
   uint32_t last_trans_now;
+};
+
+//
+// Traces
+//
+struct TraceEdge {
+  td::Bits256 trace_id;
+  td::Bits256 msg_hash;
+  std::optional<td::Bits256> left_tx;
+  std::optional<td::Bits256> right_tx;
+  bool incomplete;
+};
+
+struct Trace {
+  td::Bits256 trace_id;
+  std::optional<td::Bits256> external_hash;
+  
+  // meta
+  std::uint64_t start_lt;
+  std::uint32_t start_utime;
+
+  std::uint64_t end_lt;
+  std::uint32_t end_utime;
+
+  enum Type { complete = 0, pending = 1, new_trace = 2, broken = 3} type;
+
+  std::vector<TraceEdge> edges;
 };
 
 }  // namespace schema
@@ -394,6 +422,10 @@ struct NFTTransfer {
   td::Ref<vm::Cell> forward_payload;
 };
 
+
+//
+// Containers
+//
 struct BlockDataState {
   td::Ref<ton::validator::BlockData> block_data;
   td::Ref<vm::Cell> block_state;
@@ -421,6 +453,8 @@ struct ParsedBlock {
   std::vector<schema::Block> blocks_;
   std::vector<schema::AccountState> account_states_;
   std::vector<schema::MasterchainBlockShard> shard_state_;
+
+  std::vector<schema::Trace> traces_;
 
   std::vector<BlockchainEvent> events_;
   std::vector<BlockchainInterface> interfaces_;
