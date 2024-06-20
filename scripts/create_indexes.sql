@@ -15,7 +15,6 @@ create index if not exists transactions_index_5 on transactions (now, hash);
 create index if not exists transactions_index_6 on transactions (hash);
 create index if not exists transactions_index_7 on transactions (trace_id);
 create index if not exists transactions_index_8 on transactions (mc_block_seqno);
-create index if not exists event_detector__transaction_index_1 on transactions (lt) where (trace_id IS NULL);
 
 -- messages
 create index if not exists messages_index_1 on messages (msg_hash);

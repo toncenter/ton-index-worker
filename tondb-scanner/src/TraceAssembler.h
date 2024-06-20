@@ -3,8 +3,8 @@
 #include <queue>
 
 
-//
-// Traces
+// 
+// Utils
 //
 struct Bits256Hasher {
   std::size_t operator()(const td::Bits256& k) const {
@@ -16,107 +16,94 @@ struct Bits256Hasher {
   }
 };
 
+//
+// Trace datatypes
+//
 struct TraceEdgeImpl {
-  td::Bits256 trace_id;
-  td::Bits256 msg_hash;
-  std::optional<td::Bits256> left_tx;
-  std::optional<td::Bits256> right_tx;
-  
-  std::optional<std::string> src{std::nullopt};
-  std::optional<std::string> dest{std::nullopt};
+    using Type = schema::TraceEdge::Type;
 
-  bool incomplete{false};
-  enum Type { ord = 0, sys = 1, ext = 2, logs = 3 } type{Type::ord};
-  
-  bool is_incomplete() const { return incomplete; }
-  bool is_system() const { return type == Type::sys; }
-  bool is_external() const { return type == Type::ext; }
-  bool is_log() const { return type == Type::logs; }
-  std::string str() const;
+    td::Bits256 trace_id;
+    td::Bits256 msg_hash;
+    std::uint64_t msg_lt;
+    std::optional<td::Bits256> left_tx;
+    std::optional<td::Bits256> right_tx;
 
-  struct Hasher {
-    bool operator()(const TraceEdgeImpl& edge) const {
-      return Bits256Hasher{}(edge.msg_hash);
-    }
-  };
-
-  friend bool operator==(const TraceEdgeImpl& lhs, const TraceEdgeImpl& rhs) {
-    return lhs.msg_hash == rhs.msg_hash;
-  }
+    Type type{Type::ord};
+    bool incomplete{false};
+    bool broken{false};
+    
+    // methods
+    std::string str() const;
+    schema::TraceEdge to_schema() const;
 };
 
 struct TraceImpl {
-  using Type = schema::Trace::Type;
+    using State = schema::Trace::State;
 
-  td::Bits256 trace_id;
-  std::optional<td::Bits256> external_hash;
-  std::int32_t mc_seqno;
+    td::Bits256 trace_id;
 
-  // meta
-  std::uint64_t start_lt;
-  std::uint32_t start_utime;
+    // info
+    std::optional<td::Bits256> external_hash;
+    std::int32_t mc_seqno_start;
+    std::int32_t mc_seqno_end;
 
-  std::uint64_t end_lt{0};
-  std::uint32_t end_utime{0};
+    std::uint64_t start_lt;
+    std::uint32_t start_utime;
 
-  Type type{Type::new_trace};
+    std::uint64_t end_lt{0};
+    std::uint32_t end_utime{0};
 
-  std::unordered_map<td::Bits256, std::int32_t, Bits256Hasher> txs;
-  std::unordered_set<TraceEdgeImpl, TraceEdgeImpl::Hasher> edges;
+    State type{State::pending};
 
-  TraceImpl(const schema::Transaction &tx) :
-    trace_id(tx.hash), external_hash((tx.in_msg.has_value() ? std::optional<td::Bits256>(tx.in_msg.value().hash) : std::nullopt)),
-    start_lt(tx.lt), start_utime(tx.now), type(Type::new_trace) {}
+    std::int64_t pending_edges_{0};
+    std::int64_t edges_{0};
+    std::int64_t nodes_{0};
 
-  bool is_finished() { return edges.size() == 0; }
-
-  // utils
-  std::string str() const;
-  schema::Trace to_schema() const;
-
-  struct Hasher {
-    bool operator()(const TraceImpl& trace) const {
-      return Bits256Hasher{}(trace.trace_id);
-    }
-  };
-
-  friend bool operator==(const TraceImpl& lhs, const TraceImpl& rhs) {
-    return lhs.trace_id == rhs.trace_id;
-  }
+    // methods
+    TraceImpl(std::int32_t seqno, const schema::Transaction &tx) :
+        trace_id(tx.hash), external_hash((tx.in_msg.has_value() ? std::optional<td::Bits256>(tx.in_msg.value().hash) : std::nullopt)),
+        mc_seqno_start(seqno), mc_seqno_end(seqno), start_lt(tx.lt), start_utime(tx.now), end_lt(tx.lt), end_utime(tx.now),
+        type(State::pending), nodes_(1) {}
+    
+    std::string str() const;
+    schema::Trace to_schema() const;
 };
 using TraceImplPtr = std::shared_ptr<TraceImpl>;
 
-
-// 
+//
 // TraceAssembler
 //
 class TraceAssembler: public td::actor::Actor {
     struct Task {
+        std::int32_t seqno_;
         ParsedBlockPtr block_;
         td::Promise<ParsedBlockPtr> promise_;
     };
 
-    // block queue
+    // assembler state and queue
     std::int32_t expected_seqno_;
     std::map<std::int32_t, Task> queue_;
+    bool is_ready_{false};
+    std::int64_t broken_count_{0};
 
-    // trace assembler
-    std::uint64_t broken_count_{0};
-    std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges_;
+    // trace assembly
     std::unordered_map<td::Bits256, TraceImplPtr, Bits256Hasher> pending_traces_;
+    std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges_;
 
-    std::unordered_set<TraceImplPtr> updated_traces_;
+    std::unordered_set<td::Bits256, Bits256Hasher> updated_traces_;
+    std::unordered_set<td::Bits256, Bits256Hasher> updated_edges_;
 public:
-    TraceAssembler(std::int32_t expected_seqno) : expected_seqno_(expected_seqno), pending_edges_({}) {}
+    TraceAssembler(std::int32_t expected_seqno, bool is_ready = false) : 
+        expected_seqno_(expected_seqno), is_ready_(is_ready) {}
     
     void assemble(int mc_seqno, ParsedBlockPtr mc_block_, td::Promise<ParsedBlockPtr> promise);
     void update_expected_seqno(std::int32_t new_expected_seqno);
+    // void restore_assembler_state();
     void process_queue();
 
     void start_up() override;
     void alarm() override;
 private:
-    void process_block(ParsedBlockPtr block);
-    void process_transaction(schema::Transaction& tx);
-    void process_message(schema::Transaction& tx, const schema::Message& msg, bool is_in_msg);
+    void process_block(std::int32_t seqno, ParsedBlockPtr block);
+    void process_transaction(std::int32_t seqno, schema::Transaction& tx);
 };

@@ -198,7 +198,7 @@ struct Message {
   td::Ref<vm::Cell> init_state;
   td::optional<std::string> init_state_boc;
 
-  td::optional<std::string> decoded_text;
+  td::Bits256 trace_id;
 };
 
 struct Transaction {
@@ -299,14 +299,30 @@ struct AccountState {
 struct TraceEdge {
   td::Bits256 trace_id;
   td::Bits256 msg_hash;
+  std::uint64_t msg_lt;
   std::optional<td::Bits256> left_tx;
   std::optional<td::Bits256> right_tx;
+  enum Type { ord = 0, sys = 1, ext = 2, logs = 3 } type;
   bool incomplete;
+  bool broken;
+
+  std::string str() const {
+    td::StringBuilder sb;
+    sb << "TraceEdge("
+       << trace_id << ", "
+       << msg_hash << ", " 
+       << (left_tx.has_value() ? td::base64_encode(left_tx.value().as_slice()) : "null") << ", "
+       << (right_tx.has_value() ? td::base64_encode(right_tx.value().as_slice()) : "null") << ", "
+       << (incomplete) << ", " << broken << ")";
+    return sb.as_cslice().str();
+  }
 };
 
 struct Trace {
   td::Bits256 trace_id;
   std::optional<td::Bits256> external_hash;
+  std::int32_t mc_seqno_start;
+  std::int32_t mc_seqno_end;
   
   // meta
   std::uint64_t start_lt;
@@ -315,7 +331,11 @@ struct Trace {
   std::uint64_t end_lt;
   std::uint32_t end_utime;
 
-  enum Type { complete = 0, pending = 1, new_trace = 2, broken = 3} type;
+  enum State { complete = 0, pending = 1, broken = 2} state;
+
+  std::int64_t pending_edges_;
+  std::int64_t edges_;
+  std::int64_t nodes_;
 
   std::vector<TraceEdge> edges;
 };

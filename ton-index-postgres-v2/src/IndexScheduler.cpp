@@ -6,7 +6,7 @@
 
 void IndexScheduler::start_up() {
     event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
-    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler", from_seqno_);
+    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler", from_seqno_, true);  // TODO: remove true here
 }
 
 std::string get_time_string(double seconds) {
@@ -74,18 +74,20 @@ void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> 
         LOG(ERROR) << "Error reading existing seqnos: " << R.move_as_error();
         return;
     }
-    std::int32_t max_seqno = 0;
-    for (auto value : R.move_as_ok()) {
-        if (value > max_seqno) {
-            max_seqno = value;
-        }
-        existing_seqnos_.insert(value);
-    }
-    LOG(INFO) << "Found " << existing_seqnos_.size() << " existing seqnos";
 
-    // start loop
-    if (max_seqno > 0) {
-        td::actor::send_closure(trace_assembler_, &TraceAssembler::update_expected_seqno, max_seqno + 1);
+    std::vector<std::uint32_t> seqnos_{R.move_as_ok()};
+    if (seqnos_.size()) {
+        std::sort(seqnos_.begin(), seqnos_.end());
+        std::int32_t next_seqno = seqnos_[0];
+        for (auto value : seqnos_) {
+            if (value == next_seqno) {
+                ++next_seqno;
+                existing_seqnos_.insert(value);
+            }
+        }
+        LOG(INFO) << "Accepted " << existing_seqnos_.size() << " of " << seqnos_.size() 
+                  << " existing seqnos. Next seqno: " << next_seqno;
+        td::actor::send_closure(trace_assembler_, &TraceAssembler::update_expected_seqno, next_seqno);
     }
     alarm_timestamp() = td::Timestamp::in(1.0);
 }
@@ -200,9 +202,6 @@ void IndexScheduler::print_stats() {
     }
 
     sb << end_seqno;
-    // if (end_seqno - last_indexed_seqno_ > 100) {
-    //     sb << "(" << double(last_indexed_seqno_ - from_seqno_) / (end_seqno - from_seqno_) * 100 << "%";
-    // }
     sb << "\t" << avg_tps_ << "/s (" << get_time_string(eta) << ")"
        << "\tQ[" << cur_queue_state_.mc_blocks_ << "M, " 
        << cur_queue_state_.blocks_ << "b, " 
