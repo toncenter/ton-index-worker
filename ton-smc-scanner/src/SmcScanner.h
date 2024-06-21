@@ -22,7 +22,9 @@ private:
   std::mutex code_hashes_to_skip_mutex_;
 public:
   ShardStateScanner(td::Ref<vm::Cell> shard_state, MasterchainBlockDataState mc_block_ds) : shard_state_(shard_state), mc_block_ds_(mc_block_ds) {
-    cur_addr_.from_hex("012508807D259B1F3BDD2A830CF7F4591838E0A1D1474A476B20CFB540CD465B");
+    // cur_addr_.from_hex("012508807D259B1F3BDD2A830CF7F4591838E0A1D1474A476B20CFB540CD465B");
+
+    // cur_addr_.from_hex("E750CF93EAEDD2EC01B5DE8F49A334622BD630A8728806ABA65F1443EB7C8FD7");
 
     for (const auto &shard_ds : mc_block_ds_.shard_blocks_) {
       shard_states_.push_back(shard_ds.block_state);
@@ -37,10 +39,6 @@ public:
   };
 
   void schedule_next() {
-    if (in_progress_ > 1000) {
-      return;
-    }
-
     block::gen::ShardStateUnsplit::Record sstate;
     if (!tlb::unpack_cell(shard_state_, sstate)) {
       LOG(ERROR) << "Failed to unpack ShardStateUnsplit";
@@ -53,13 +51,17 @@ public:
     bool eof = false;
     bool allow_same = true;
 
-    while (!eof && in_progress_ < 1000) {
+    while (!eof && in_progress_ < 100) {
       auto shard_account_csr = accounts_dict.vm::DictionaryFixed::lookup_nearest_key(cur_addr_.bits(), 256, true, allow_same);
       if (shard_account_csr.is_null()) {
         eof = true;
         break;
       }
       allow_same = false;
+
+      // if (cur_addr_.to_hex() != "E753CF93EAEDD2EC01B5DE8F49A334622BD630A8728806ABA65F1443EB7C8FD7") {
+      //   continue;
+      // }
 
       td::Ref<vm::Cell> account_root = shard_account_csr->prefetch_ref();
 
@@ -166,20 +168,34 @@ public:
       if (to_insert.size()) {
         td::MultiPromise mp;
         auto ig = mp.init_guard();
-        ig.add_promise(td::PromiseCreator::lambda([&](td::Result<td::Unit> R){
+        ig.add_promise(td::PromiseCreator::lambda([this, to_insert](td::Result<td::Unit> R){
           if (R.is_error()) {
             LOG(ERROR) << "Failed to insert to PG: " << R.move_as_error();
+            retry_insert(to_insert);
+          } else {
+            in_progress_.fetch_sub(1);
           }
-          in_progress_.fetch_sub(1);
         }));
-        td::actor::create_actor<PostgresInserter>("PostgresInserter", PgCredential{"127.0.0.1", 5432, "postgres", "", "ton_index"}, std::move(to_insert), ig.get_promise()).release();
-        // td::actor::create_actor<PostgresInserter>("PostgresInserter", PgCredential{"127.0.0.1", 5432, "postgres", "", "ton_index"}, std::move(to_insert), ig.get_promise()).release();
-        // td::actor::create_actor<PostgresInserter>("PostgresInserter", PgCredential{"127.0.0.1", 5432, "postgres", "", "ton_index"}, std::move(to_insert), ig.get_promise()).release();
+        td::actor::create_actor<PostgresInserter>("PostgresInserter03", PgCredential{"127.0.0.1", 5432, "postgres", "", "ton_index"}, to_insert, ig.get_promise()).release();
       } else {
         in_progress_.fetch_sub(1);
       }
 
     })).release();
+  }
+
+  void retry_insert(std::vector<PgInsertData> to_insert) {
+    td::MultiPromise mp2;
+    auto ig2 = mp2.init_guard();
+    ig2.add_promise(td::PromiseCreator::lambda([&](td::Result<td::Unit> R){
+      if (R.is_ok()) {
+        LOG(ERROR) << "Retry insert success";
+      } else {
+        LOG(ERROR) << "Retry insert also failed";
+      }
+      in_progress_.fetch_sub(1);
+    }));
+    td::actor::create_actor<PostgresInserter>("PostgresInserter03", PgCredential{"127.0.0.1", 5432, "postgres", "", "ton_index"}, to_insert, ig2.get_promise()).release();
   }
 };
 

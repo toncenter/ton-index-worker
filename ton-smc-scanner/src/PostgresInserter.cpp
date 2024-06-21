@@ -93,7 +93,7 @@ void PostgresInserter::insert_jetton_masters(pqxx::work &transaction) {
         << "code_hash = EXCLUDED.code_hash, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
         << "code_boc = EXCLUDED.code_boc, "
-        << "data_boc = EXCLUDED.data_boc WHERE jetton_masters.last_transaction_lt < EXCLUDED.last_transaction_lt";
+        << "data_boc = EXCLUDED.data_boc WHERE jetton_masters.last_transaction_lt <= EXCLUDED.last_transaction_lt";
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
   transaction.exec0(query.str());
@@ -135,7 +135,7 @@ void PostgresInserter::insert_jetton_wallets(pqxx::work &transaction) {
         << "jetton = EXCLUDED.jetton, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
         << "code_hash = EXCLUDED.code_hash, "
-        << "data_hash = EXCLUDED.data_hash WHERE jetton_wallets.last_transaction_lt < EXCLUDED.last_transaction_lt";
+        << "data_hash = EXCLUDED.data_hash WHERE jetton_wallets.last_transaction_lt <= EXCLUDED.last_transaction_lt";
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
   transaction.exec0(query.str());
