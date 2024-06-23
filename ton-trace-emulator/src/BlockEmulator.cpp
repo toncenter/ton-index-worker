@@ -1,5 +1,6 @@
 #include "BlockEmulator.h"
 #include "TraceInserter.h"
+#include "TraceInterfaceDetector.h"
 
 class BlockParser: public td::actor::Actor {
     td::Ref<ton::validator::BlockData> block_data_;
@@ -220,6 +221,32 @@ void McBlockEmulator::emulate_traces() {
     }
 }
 
+td::Result<block::Account> McBlockEmulator::fetch_account(const block::StdAddress& addr, ton::UnixTime now) {
+    for (const auto &shard_state : shard_states_) {
+        block::gen::ShardStateUnsplit::Record sstate;
+        if (!tlb::unpack_cell(shard_state, sstate)) {
+            return td::Status::Error("Failed to unpack ShardStateUnsplit");
+        }
+        block::ShardId shard;
+        if (!(shard.deserialize(sstate.shard_id.write()))) {
+            return td::Status::Error("Failed to deserialize ShardId");
+        }
+        if (shard.workchain_id == addr.workchain && ton::shard_contains(ton::ShardIdFull(shard).shard, addr.addr)) {
+            vm::AugmentedDictionary accounts_dict{vm::load_cell_slice_ref(sstate.accounts), 256, block::tlb::aug_ShardAccounts};
+            auto account = block::Account(addr.workchain, addr.addr.cbits());
+            auto account_cs = accounts_dict.lookup(addr.addr);
+            if (account_cs.is_null()) {
+                return td::Status::Error("Account not found in shard_states");
+            } else if (!account.unpack(std::move(account_cs), now, 
+                                    addr.workchain == ton::masterchainId && emulator_->get_config().is_special_smartcontract(addr.addr))) {
+                return td::Status::Error("Failed to unpack account");
+            }
+            return account;
+        }
+    }
+    return td::Status::Error("Account not found in shard_states");
+}
+
 void McBlockEmulator::create_trace(const TransactionInfo& tx, td::Promise<Trace *> promise) {
     Trace *trace = new Trace();
     trace->emulated = false;
@@ -227,6 +254,12 @@ void McBlockEmulator::create_trace(const TransactionInfo& tx, td::Promise<Trace 
     trace->transaction_root = tx.root;
     trace->id = tx.initial_msg_hash.value();
     trace->node_id = tx.in_msg_hash;
+    auto account = fetch_account(tx.account, emulator_->get_unixtime());
+    if (account.is_error()) {
+        promise.set_error(account.move_as_error_prefix("Failed to fetch account from shard states: "));
+        return;
+    }
+    trace->account = std::make_unique<block::Account>(account.move_as_ok());
 
     td::MultiPromise mp;
     auto ig = mp.init_guard();
@@ -293,17 +326,42 @@ void McBlockEmulator::trace_error(td::Bits256 tx_hash, TraceId trace_id, td::Sta
 }
 
 void McBlockEmulator::trace_received(td::Bits256 tx_hash, Trace *trace) {
-    LOG(INFO) << "Emulated trace from tx " << tx_hash.to_hex() << ": " << trace->transactions_count() << " transactions, " << trace->depth() << " depth";
-    // LOG(INFO) << trace->to_string();
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace](td::Result<td::Unit> R) {
+    LOG(INFO) << "Emulated trace " << trace->id.to_hex() << " from tx " << tx_hash.to_hex() << ": " << trace->transactions_count() << " transactions, " << trace->depth() << " depth";
+    if (true) { // interface detection enabled
+        auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<std::unique_ptr<Trace>> R) {
+            if (R.is_error()) {
+                td::actor::send_closure(SelfId, &McBlockEmulator::trace_interfaces_error, trace_id, R.move_as_error());
+                return;
+            }
+            td::actor::send_closure(SelfId, &McBlockEmulator::insert_trace, R.move_as_ok());
+        });
+
+        AllShardStates shard_states;
+        for (const auto &shard_ds : mc_data_state_.shard_blocks_) {
+            shard_states.push_back(shard_ds.block_state);
+        }
+
+        td::actor::create_actor<TraceInterfaceDetector>("TraceInterfaceDetector", std::move(shard_states), mc_data_state_.config_, std::unique_ptr<Trace>(trace), std::move(P)).release();
+    } else {
+        insert_trace(std::unique_ptr<Trace>(trace));
+    }
+}
+
+void McBlockEmulator::trace_interfaces_error(TraceId trace_id, td::Status error) {
+    LOG(ERROR) << "Failed to detect interfaces on trace_id " << trace_id.to_hex() << ": " << error;
+    trace_ids_in_progress_.erase(trace_id);
+}
+
+void McBlockEmulator::insert_trace(std::unique_ptr<Trace> trace) {
+    LOG(INFO) << trace->to_string();
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<td::Unit> R) {
         if (R.is_error()) {
-            td::actor::send_closure(SelfId, &McBlockEmulator::trace_insert_failed, trace->id, R.move_as_error());
+            td::actor::send_closure(SelfId, &McBlockEmulator::trace_insert_failed, trace_id, R.move_as_error());
             return;
         }
-        td::actor::send_closure(SelfId, &McBlockEmulator::trace_inserted, trace->id);
+        td::actor::send_closure(SelfId, &McBlockEmulator::trace_inserted, trace_id);
     });
-    auto trace_ptr = std::shared_ptr<Trace>(trace);
-    td::actor::create_actor<TraceInserter>("TraceInserter", trace_ptr, std::move(P)).release();
+    td::actor::create_actor<TraceInserter>("TraceInserter", std::move(trace), std::move(P)).release();
 }
 
 void McBlockEmulator::trace_insert_failed(td::Bits256 trace_id, td::Status error) {

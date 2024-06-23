@@ -1,4 +1,5 @@
 #include <td/actor/actor.h>
+#include <ton/ton-types.h>
 #include <emulator/transaction-emulator.h>
 #include "IndexData.h"
 #include "TraceEmulator.h"
@@ -51,8 +52,12 @@ private:
     void create_trace(const TransactionInfo& tx, td::Promise<Trace *> promise);
     void trace_error(td::Bits256 tx_hash, TraceId trace_id, td::Status error);
     void trace_received(td::Bits256 tx_hash, Trace *trace);
+    void trace_interfaces_error(TraceId trace_id, td::Status error);
+    void insert_trace(std::unique_ptr<Trace> trace);
     void trace_insert_failed(td::Bits256 trace_id, td::Status error);
     void trace_inserted(TraceId trace_id);
+
+    td::Result<block::Account> fetch_account(const block::StdAddress& addr, ton::UnixTime now);
 
 public:
     McBlockEmulator(MasterchainBlockDataState mc_data_state, td::Promise<> promise);

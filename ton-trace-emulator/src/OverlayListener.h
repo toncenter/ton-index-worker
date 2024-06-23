@@ -24,12 +24,15 @@ private:
     std::unordered_set<td::Bits256, BitArrayHasher> known_ext_msgs_; // this set grows infinitely. TODO: remove old messages
     std::vector<td::Ref<vm::Cell>> shard_states_;
     std::shared_ptr<emulator::TransactionEmulator> emulator_;
+    std::shared_ptr<block::ConfigInfo> config_;
 
     int traces_cnt_{0};
 
     void process_external_message(td::Ref<ton::validator::ExtMessageQ> message);
     void trace_error(TraceId trace_id, td::Status error);
     void trace_received(TraceId trace_id, Trace *trace);
+    void trace_interfaces_error(TraceId trace_id, td::Status error);
+    void insert_trace(std::unique_ptr<Trace> trace);
     void trace_insert_failed(TraceId trace_id, td::Status error);
     void trace_inserted(TraceId trace_id);
 
@@ -47,5 +50,7 @@ public:
         auto libraries_root = mc_data_state.config_->get_libraries_root();
         emulator_ = std::make_shared<emulator::TransactionEmulator>(mc_data_state.config_, 0);
         emulator_->set_libs(vm::Dictionary(libraries_root, 256));
+
+        config_ = mc_data_state.config_;
     }
 };

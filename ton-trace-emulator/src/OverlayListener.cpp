@@ -2,6 +2,8 @@
 #include "OverlayListener.h"
 #include <tdutils/td/utils/filesystem.h>
 #include "TraceInserter.h"
+#include "TraceInterfaceDetector.h"
+
 
 void OverlayListener::start_up() {
     auto pk = ton::PrivateKey{ton::privkeys::Ed25519::random()};
@@ -129,16 +131,34 @@ void OverlayListener::trace_error(TraceId trace_id, td::Status error) {
 
 void OverlayListener::trace_received(TraceId trace_id, Trace *trace) {
     LOG(INFO) << "Emulated trace from ext msg " << trace_id.to_hex() << ": " << trace->transactions_count() << " transactions, " << trace->depth() << " depth";
-    // LOG(INFO) << trace->to_string();
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace](td::Result<td::Unit> R) {
+    if (true) {
+        auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<std::unique_ptr<Trace>> R) {
+            if (R.is_error()) {
+                td::actor::send_closure(SelfId, &OverlayListener::trace_interfaces_error, trace_id, R.move_as_error());
+                return;
+            }
+            td::actor::send_closure(SelfId, &OverlayListener::insert_trace, R.move_as_ok());
+        });
+
+        td::actor::create_actor<TraceInterfaceDetector>("TraceInterfaceDetector", shard_states_, config_, std::unique_ptr<Trace>(trace), std::move(P)).release();
+    } else {
+        insert_trace(std::unique_ptr<Trace>(trace));
+    }
+}
+
+void OverlayListener::trace_interfaces_error(TraceId trace_id, td::Status error) {
+    LOG(ERROR) << "Failed to detect interfaces on trace_id " << trace_id.to_hex() << ": " << error;
+}
+
+void OverlayListener::insert_trace(std::unique_ptr<Trace> trace) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<td::Unit> R) {
         if (R.is_error()) {
-            td::actor::send_closure(SelfId, &OverlayListener::trace_insert_failed, trace->id, R.move_as_error());
+            td::actor::send_closure(SelfId, &OverlayListener::trace_insert_failed, trace_id, R.move_as_error());
             return;
         }
-        td::actor::send_closure(SelfId, &OverlayListener::trace_inserted, trace->id);
+        td::actor::send_closure(SelfId, &OverlayListener::trace_inserted, trace_id);
     });
-    auto trace_ptr = std::shared_ptr<Trace>(trace);
-    td::actor::create_actor<TraceInserter>("TraceInserter", trace_ptr, std::move(P)).release();
+    td::actor::create_actor<TraceInserter>("TraceInserter", std::move(trace), std::move(P)).release();
 }
 
 void OverlayListener::trace_insert_failed(TraceId trace_id, td::Status error) {

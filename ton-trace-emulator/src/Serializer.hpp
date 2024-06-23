@@ -47,6 +47,23 @@ namespace msgpack {
       }
     };
 
+    template<>
+    struct pack<td::RefInt256> {
+      template <typename Stream>
+      msgpack::packer<Stream>& operator()(msgpack::packer<Stream>& o, const td::RefInt256& v) const {
+        o.pack(v->to_dec_string());
+        return o;
+      }
+    };
+
+    template <>
+    struct convert<td::RefInt256> {
+      msgpack::object const& operator()(msgpack::object const& o, td::RefInt256& v) const {
+        throw std::runtime_error("Deserializion of td::RefInt256 is not implemented");
+        return o;
+      }
+    };
+
     } // namespace adaptor
   } // MSGPACK_API_VERSION_NAMESPACE(MSGPACK_DEFAULT_API_NS)
 } // namespace msgpack
@@ -580,4 +597,92 @@ td::Result<Transaction> parse_tx(td::Ref<vm::Cell> root, ton::WorkchainId workch
   auto descr_cs = vm::load_cell_slice(trans.description);
   TRY_RESULT_ASSIGN(schema_tx.description, process_transaction_descr(descr_cs));
   return schema_tx;
+}
+
+
+struct JettonWalletSchema {
+  td::RefInt256 balance;
+  block::StdAddress address;
+  block::StdAddress owner;
+  block::StdAddress jetton;
+
+  MSGPACK_DEFINE(balance, address, owner, jetton);
+};
+struct JettonMasterSchema {
+  block::StdAddress address;
+  td::RefInt256 total_supply;
+  bool mintable;
+  std::optional<block::StdAddress> admin_address;
+  std::optional<std::map<std::string, std::string>> jetton_content;
+  td::Bits256 jetton_wallet_code_hash;
+
+  MSGPACK_DEFINE(address, total_supply, mintable, admin_address, jetton_content, jetton_wallet_code_hash);
+};
+
+struct NftItemSchema {
+  block::StdAddress address;
+  bool init;
+  td::RefInt256 index;
+  std::optional<block::StdAddress> collection_address;
+  block::StdAddress owner_address;
+  std::optional<std::map<std::string, std::string>> content;
+
+  MSGPACK_DEFINE(address, init, index, collection_address, owner_address, content);
+};
+struct NftCollectionSchema {
+  block::StdAddress address;
+  td::RefInt256 next_item_index;
+  std::optional<block::StdAddress> owner_address;
+  std::optional<std::map<std::string, std::string>> collection_content;
+
+  MSGPACK_DEFINE(address, next_item_index, owner_address, collection_content);
+};
+
+struct AddressInterfaces {
+  std::vector<std::variant<JettonWalletSchema, JettonMasterSchema, NftItemSchema, NftCollectionSchema>> interfaces;
+
+  MSGPACK_DEFINE(interfaces);
+};
+
+AddressInterfaces parse_interfaces(std::vector<std::variant<JettonWalletDetectorR::Result, JettonMasterDetectorR::Result, NftItemDetectorR::Result, NftCollectionDetectorR::Result>> interfaces) {
+  AddressInterfaces result;
+  for (const auto& interface : interfaces) {
+    std::visit([&](auto&& arg) {
+      using T = std::decay_t<decltype(arg)>;
+      if constexpr (std::is_same_v<T, JettonMasterDetectorR::Result>) {
+        JettonMasterSchema schema;
+        schema.address = arg.address;
+        schema.total_supply = arg.total_supply;
+        schema.mintable = arg.mintable;
+        schema.admin_address = arg.admin_address;
+        schema.jetton_content = arg.jetton_content;
+        schema.jetton_wallet_code_hash = arg.jetton_wallet_code_hash.bits();
+        result.interfaces.push_back(schema);
+      } else if constexpr (std::is_same_v<T, JettonWalletDetectorR::Result>) {
+        JettonWalletSchema schema;
+        schema.balance = arg.balance;
+        schema.address = arg.address;
+        schema.owner = arg.owner;
+        schema.jetton = arg.jetton;
+        result.interfaces.push_back(schema);
+      } else if constexpr (std::is_same_v<T, NftItemDetectorR::Result>) {
+        NftItemSchema schema;
+        schema.address = arg.address;
+        schema.init = arg.init;
+        schema.index = arg.index;
+        schema.collection_address = arg.collection_address;
+        schema.owner_address = arg.owner_address;
+        schema.content = arg.content;
+        result.interfaces.push_back(schema);
+      } else if constexpr (std::is_same_v<T, NftCollectionDetectorR::Result>) {
+        NftCollectionSchema schema;
+        schema.address = arg.address;
+        schema.next_item_index = arg.next_item_index;
+        schema.owner_address = arg.owner_address;
+        schema.collection_content = arg.collection_content;
+        result.interfaces.push_back(schema);
+      }
+    }, interface);
+  }
+  return result;
 }

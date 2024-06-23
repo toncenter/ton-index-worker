@@ -43,8 +43,8 @@ public:
     block::StdAddress address;
     td::RefInt256 total_supply;
     bool mintable;
-    td::optional<block::StdAddress> admin_address;
-    td::optional<std::map<std::string, std::string>> jetton_content;
+    std::optional<block::StdAddress> admin_address;
+    std::optional<std::map<std::string, std::string>> jetton_content;
     vm::CellHash jetton_wallet_code_hash;
   };
 

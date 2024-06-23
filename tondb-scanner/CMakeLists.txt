@@ -11,7 +11,6 @@ add_library(tondb-scanner STATIC
     src/convert-utils.cpp
     src/tokens.cpp
     src/smc-interfaces/Jettons.cpp
-    src/smc-interfaces/InterfacesDetector.cpp
 )
 
 target_include_directories(tondb-scanner 

@@ -7,6 +7,9 @@
 
 
 void TraceEmulator::set_error(td::Status error) {
+    if (result_) {
+        delete result_;
+    }
     promise_.set_error(std::move(error));
     stop();
 }
@@ -107,6 +110,7 @@ void TraceEmulator::emulate_transaction(std::unique_ptr<block::Account> account)
     result_->emulated = true;
     result_->workchain = account->workchain;
     result_->transaction_root = emulation_success.transaction;
+    result_->account = std::make_unique<block::Account>(emulation_success.account);
 
     // LOG(INFO) << emulation_success.vm_log;
     

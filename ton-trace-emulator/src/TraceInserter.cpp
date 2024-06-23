@@ -4,6 +4,7 @@
 void TraceInserter::start_up() {
     try {
         std::queue<std::reference_wrapper<Trace>> queue;
+        std::unordered_map<std::string, typeof(trace_->interfaces)> addr_interfaces;
 
         queue.push(*trace_);
 
@@ -11,7 +12,7 @@ void TraceInserter::start_up() {
             Trace& current = queue.front();
             queue.pop();
 
-            for (auto child : current.children) {
+            for (auto& child : current.children) {
                 queue.push(*child);
             }
 
@@ -36,6 +37,21 @@ void TraceInserter::start_up() {
             auto addr_raw = std::to_string(tx.account.workchain) + ":" + tx.account.addr.to_hex();
             auto by_addr_key = trace_->id.to_hex() + ":" + tx.in_msg.value().hash.to_hex();
             redis_.zadd(addr_raw, {std::make_pair(by_addr_key, tx.lt)});
+
+            if (current.interfaces.has_value()) {
+                addr_interfaces[addr_raw] = current.interfaces;
+            } else {
+                LOG(ERROR) << "No interfaces for " << addr_raw;
+            }
+        }
+
+        for (const auto& [addr_raw, interfaces] : addr_interfaces) {
+            if (interfaces.has_value()) {
+                auto interfaces_redis = parse_interfaces(interfaces.value());
+                std::stringstream buffer;
+                msgpack::pack(buffer, interfaces_redis);
+                redis_.hset(trace_->id.to_hex(), addr_raw, buffer.str());
+            }
         }
 
         redis_.publish("new_trace", trace_->id.to_hex());

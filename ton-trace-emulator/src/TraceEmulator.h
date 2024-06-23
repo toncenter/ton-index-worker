@@ -4,6 +4,7 @@
 #include <emulator/transaction-emulator.h>
 #include "DbScanner.h"
 
+#include "smc-interfaces/InterfacesDetector.h"
 
 using TraceId = td::Bits256;
 
@@ -15,9 +16,14 @@ struct Trace {
     td::Ref<vm::Cell> transaction_root;
     bool emulated;
 
+    std::unique_ptr<block::Account> account;
+    std::optional<std::vector<typename InterfacesDetector<JettonWalletDetectorR, JettonMasterDetectorR, NftItemDetectorR, NftCollectionDetectorR>::DetectedInterface>> interfaces;
+
     ~Trace() {
         for (Trace* child : children) {
-            delete child;
+            if (child != nullptr) {
+                delete child;
+            }
         }
     }
 
@@ -48,7 +54,7 @@ struct Trace {
         block::gen::TransactionDescr::Record_trans_ord descr;
         tlb::unpack_cell(transaction_root, trans);
         tlb::unpack_cell(trans.description, descr);
-        ss << "TX acc=" << trans.account_addr.to_hex() << " lt=" << trans.lt << " outmsg_cnt=" << trans.outmsg_cnt << " aborted=" << descr.aborted << std::endl;
+        ss << "TX acc=" << trans.account_addr.to_hex() << " lt=" << trans.lt << " outmsg_cnt=" << trans.outmsg_cnt << " aborted=" << descr.aborted << " int_count: " << (interfaces.has_value() ? interfaces.value().size() : -1) << std::endl;
 
         for (const auto child : children) {
             ss << child->to_string(tabs + 1);
@@ -84,7 +90,7 @@ private:
     td::Promise<Trace *> promise_;
     size_t depth_{20};
     size_t pending_{0};
-    Trace *result_;
+    Trace *result_{nullptr};
 
     void set_error(td::Status error);
     std::unique_ptr<block::Account> unpack_account(vm::AugmentedDictionary& accounts_dict);
