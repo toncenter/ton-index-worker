@@ -1323,7 +1323,7 @@ std::string InsertBatchPostgres::insert_jetton_transfers(pqxx::work &txn) {
             << TO_SQL_OPTIONAL_STRING(custom_payload_boc, txn) << ","
             << (transfer.forward_ton_amount.not_null() ? transfer.forward_ton_amount->to_dec_string() : "NULL") << ","
             << TO_SQL_OPTIONAL_STRING(forward_payload_boc, txn) << ","
-            << "NULL"  // TODO: trace_id
+            << txn.quote(td::base64_encode(transfer.trace_id.as_slice()))
             << ")";
     }
   }
@@ -1364,7 +1364,7 @@ std::string InsertBatchPostgres::insert_jetton_burns(pqxx::work &txn) {
             << (burn.amount.not_null() ? burn.amount->to_dec_string() : "NULL") << ","
             << txn.quote(burn.response_destination) << ","
             << TO_SQL_OPTIONAL_STRING(custom_payload_boc, txn) << ","
-            << "NULL"  // TODO: trace_id
+            << txn.quote(td::base64_encode(burn.trace_id.as_slice()))
             << ")";
     }
   }
@@ -1410,7 +1410,7 @@ std::string InsertBatchPostgres::insert_nft_transfers(pqxx::work &txn) {
             << TO_SQL_OPTIONAL_STRING(custom_payload_boc, txn) << ","
             << (transfer.forward_amount.not_null() ? transfer.forward_amount->to_dec_string() : "NULL") << ","
             << TO_SQL_OPTIONAL_STRING(forward_payload_boc, txn) << ","
-            << "NULL"  // TODO: trace_id
+            << txn.quote(td::base64_encode(transfer.trace_id.as_slice()))
             << ")";
     }
   }
@@ -1433,7 +1433,7 @@ std::string InsertBatchPostgres::insert_traces(pqxx::work &txn) {
 
   traces_query << "INSERT INTO traces (trace_id, external_hash, mc_seqno_start, mc_seqno_end, "
                   "start_lt, start_utime, end_lt, end_utime, state, pending_edges_, edges_, nodes_) VALUES ";
-  edges_query << "INSERT INTO trace_edges (trace_id, msg_hash, msg_lt, left_tx, right_tx, incomplete, broken) VALUES ";
+  edges_query << "INSERT INTO trace_edges (trace_id, msg_hash, left_tx, right_tx, incomplete, broken) VALUES ";
   
   bool is_first_trace = true;
   bool is_first_edge = true;
@@ -1492,7 +1492,6 @@ std::string InsertBatchPostgres::insert_traces(pqxx::work &txn) {
     edges_query << "("
                 << txn.quote(B64HASH(edge.trace_id)) << ","
                 << txn.quote(B64HASH(edge.msg_hash)) << ","
-                << edge.msg_lt << ","
                 << (edge.left_tx.has_value() ? txn.quote(B64HASH(edge.left_tx.value())) : "NULL" ) << ","
                 << (edge.right_tx.has_value() ? txn.quote(B64HASH(edge.right_tx.value())) : "NULL" ) << ","
                 << TO_SQL_BOOL(edge.incomplete) << ","
@@ -1511,11 +1510,11 @@ std::string InsertBatchPostgres::insert_traces(pqxx::work &txn) {
     full_query = traces_query.str();
   }
   if (!is_first_edge) {
-    edges_query << " ON CONFLICT (msg_hash, msg_lt) DO UPDATE SET "
-                << "trace_id = EXCLUDED.trace_id, "
+    edges_query << " ON CONFLICT (trace_id, msg_hash) DO UPDATE SET "
                 << "left_tx = EXCLUDED.left_tx, "
                 << "right_tx = EXCLUDED.right_tx, "
-                << "incomplete = EXCLUDED.incomplete "
+                << "incomplete = EXCLUDED.incomplete, "
+                << "broken = EXCLUDED.broken "
                 << "WHERE not EXCLUDED.incomplete and not EXCLUDED.broken;\n";
     full_query += edges_query.str();
   }
@@ -1892,21 +1891,20 @@ void InsertManagerPostgres::start_up() {
       "create table if not exists trace_edges ("
       "trace_id char(44), "
       "msg_hash char(44), "
-      "msg_lt bigint, "
       "left_tx varchar, "
       "right_tx varchar, "
       "incomplete boolean, "
       "broken boolean, "
-      "primary key (msg_hash, msg_lt), "
+      "primary key (trace_id, msg_hash), "
       "foreign key (trace_id) references traces"
       ");\n"
     );
 
     // some necessary indexes
     query += (
-      "create index if not exists traces_index_1 on traces (trace_id) where (not state = 'complete');\n"
-      "create index if not exists trace_edges_index_1 on trace_edges (msg_hash, msg_lt) where (incomplete = TRUE);\n"
-      "create index if not exists trace_edges_index_2 on trace_edges (trace_id);\n"
+      "create index if not exists traces_index_1 on traces (state);\n"
+      "create index if not exists trace_edges_index_1 on trace_edges (msg_hash);\n"
+      "create index if not exists trace_edges_index_2 on trace_edges (incomplete);\n"
     );
 
     LOG(DEBUG) << query;

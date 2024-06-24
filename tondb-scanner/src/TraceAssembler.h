@@ -89,6 +89,7 @@ class TraceAssembler: public td::actor::Actor {
     // trace assembly
     std::unordered_map<td::Bits256, TraceImplPtr, Bits256Hasher> pending_traces_;
     std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges_;
+    std::vector<TraceEdgeImpl> edges_found_;
 
     std::unordered_set<td::Bits256, Bits256Hasher> updated_traces_;
     std::unordered_set<td::Bits256, Bits256Hasher> updated_edges_;
@@ -98,7 +99,7 @@ public:
     
     void assemble(int mc_seqno, ParsedBlockPtr mc_block_, td::Promise<ParsedBlockPtr> promise);
     void update_expected_seqno(std::int32_t new_expected_seqno);
-    // void restore_assembler_state();
+    void restore_trace_assembler_state(std::vector<schema::Trace> pending_traces, std::vector<schema::TraceEdge> pending_edges);
     void process_queue();
 
     void start_up() override;
