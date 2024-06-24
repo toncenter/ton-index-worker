@@ -35,8 +35,11 @@ struct TraceEdgeImpl {
     // methods
     std::string str() const;
     schema::TraceEdge to_schema() const;
+    static TraceEdgeImpl from_schema(const schema::TraceEdge& edge);
 };
 
+struct TraceImpl;
+using TraceImplPtr = std::shared_ptr<TraceImpl>;
 struct TraceImpl {
     using State = schema::Trace::State;
 
@@ -53,22 +56,23 @@ struct TraceImpl {
     std::uint64_t end_lt{0};
     std::uint32_t end_utime{0};
 
-    State type{State::pending};
+    State state{State::pending};
 
     std::int64_t pending_edges_{0};
     std::int64_t edges_{0};
     std::int64_t nodes_{0};
 
     // methods
+    TraceImpl() {}
     TraceImpl(std::int32_t seqno, const schema::Transaction &tx) :
         trace_id(tx.hash), external_hash((tx.in_msg.has_value() ? std::optional<td::Bits256>(tx.in_msg.value().hash) : std::nullopt)),
         mc_seqno_start(seqno), mc_seqno_end(seqno), start_lt(tx.lt), start_utime(tx.now), end_lt(tx.lt), end_utime(tx.now),
-        type(State::pending), nodes_(1) {}
+        state(State::pending), nodes_(1) {}
     
     std::string str() const;
     schema::Trace to_schema() const;
+    static TraceImplPtr from_schema(const schema::Trace& trace);
 };
-using TraceImplPtr = std::shared_ptr<TraceImpl>;
 
 //
 // TraceAssembler
@@ -99,7 +103,7 @@ public:
     
     void assemble(int mc_seqno, ParsedBlockPtr mc_block_, td::Promise<ParsedBlockPtr> promise);
     void update_expected_seqno(std::int32_t new_expected_seqno);
-    void restore_trace_assembler_state(std::vector<schema::Trace> pending_traces, std::vector<schema::TraceEdge> pending_edges);
+    void restore_trace_assembler_state(schema::TraceAssemblerState state);
     void process_queue();
 
     void start_up() override;

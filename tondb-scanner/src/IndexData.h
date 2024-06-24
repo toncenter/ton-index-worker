@@ -340,6 +340,11 @@ struct Trace {
   std::vector<TraceEdge> edges;
 };
 
+struct TraceAssemblerState {
+  std::vector<TraceEdge> pending_edges_;
+  std::vector<Trace> pending_traces_;
+};
+
 }  // namespace schema
 
 struct JettonMasterData {

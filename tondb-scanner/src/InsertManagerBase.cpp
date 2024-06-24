@@ -24,7 +24,6 @@ void InsertManagerBase::alarm() {
     td::actor::send_closure(actor_id(this), &InsertManagerBase::schedule_next_insert_batches, false);
 }
 
-
 void InsertManagerBase::print_info() {
   LOG(INFO) << "Insert manager(parallel=" << max_parallel_insert_actors_
             << ", max_batch_mc_blocks=" << batch_size_.mc_blocks_

@@ -6,7 +6,7 @@
 
 void IndexScheduler::start_up() {
     event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
-    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler", from_seqno_, true);  // TODO: remove true here
+    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler", from_seqno_);
 }
 
 std::string get_time_string(double seconds) {
@@ -67,6 +67,16 @@ void IndexScheduler::run() {
         td::actor::send_closure(SelfId, &IndexScheduler::got_existing_seqnos, std::move(R));
     });
     td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P), from_seqno_, to_seqno_);
+
+    // restore TraceAssembler state
+    auto Q = td::PromiseCreator::lambda([trace_assembler = trace_assembler_.get()](td::Result<schema::TraceAssemblerState> R) {
+        if (R.is_error()) {
+            LOG(ERROR) << "Failed to read TraceAssemblerState from database";
+            std::_Exit(2);
+        }
+        td::actor::send_closure(trace_assembler, &TraceAssembler::restore_trace_assembler_state, R.move_as_ok());
+    });
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_trace_assembler_state, std::move(Q));
 }
 
 void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> R) {
