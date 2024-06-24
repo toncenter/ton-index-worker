@@ -369,6 +369,7 @@ struct JettonWalletData {
 };
 
 struct JettonTransfer {
+  td::Bits256 trace_id;
   td::Bits256 transaction_hash;
   uint64_t transaction_lt;
   uint32_t transaction_now;
@@ -386,6 +387,7 @@ struct JettonTransfer {
 };
 
 struct JettonBurn {
+  td::Bits256 trace_id;
   td::Bits256 transaction_hash;
   uint64_t transaction_lt;
   uint32_t transaction_now;
@@ -426,6 +428,7 @@ struct NFTItemData {
 };
 
 struct NFTTransfer {
+  td::Bits256 trace_id;
   td::Bits256 transaction_hash;
   uint64_t transaction_lt;
   uint32_t transaction_now;
