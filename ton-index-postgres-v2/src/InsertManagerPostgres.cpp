@@ -1924,6 +1924,78 @@ void InsertManagerPostgres::set_max_data_depth(std::int32_t value) {
   max_data_depth_ = value;
 }
 
+void InsertManagerPostgres::get_trace_assembler_state(td::Promise<schema::TraceAssemblerState> promise) {
+  pqxx::connection c(credential_.get_connection_string());
+
+  auto to_bits256 = [](std::string value) {
+    auto R = td::base64_decode(value);
+    if (R.is_error()) {
+      LOG(ERROR) << "Failed to decode b64 string: " << value;
+      std::_Exit(2);
+    }
+    return td::Bits256(td::ConstBitPtr(td::Slice(R.move_as_ok()).ubegin()));
+  };
+  try {
+    schema::TraceAssemblerState state;
+    {
+      pqxx::work txn(c);
+      std::string query = "select trace_id, external_hash, mc_seqno_start, mc_seqno_end, start_lt, start_utime, end_lt, end_utime, state, pending_edges_, edges_, nodes_ from traces where state = 'pending';";
+      pqxx::result result = txn.exec(query);
+      txn.commit();
+      for (auto row : result) {
+        schema::Trace trace;
+        trace.trace_id = to_bits256(row[0].as<std::string>());
+        if (!row[1].is_null()) {
+          trace.external_hash = to_bits256(row[1].as<std::string>());
+        }
+        trace.mc_seqno_start = row[2].as<std::int32_t>();
+        trace.mc_seqno_end = row[3].as<std::int32_t>();
+        trace.start_lt = row[4].as<std::uint64_t>();
+        trace.start_utime = row[5].as<std::uint32_t>();
+        trace.end_lt = row[6].as<std::uint64_t>();
+        trace.end_utime = row[7].as<std::uint32_t>();
+        if (row[8].as<std::string>() != "pending") {
+          LOG(ERROR) << "Error in request. Got non-pending trace!";
+        }
+        trace.state = schema::Trace::State::pending;
+        trace.pending_edges_ = row[9].as<std::int64_t>();
+        trace.edges_ = row[10].as<std::int64_t>();
+        trace.nodes_ = row[11].as<std::int64_t>();
+
+        state.pending_traces_.push_back(std::move(trace));
+      }
+    }
+    {
+      pqxx::work txn(c);
+      std::string query = "select trace_id, msg_hash, left_tx, right_tx, incomplete, broken from trace_edges where incomplete;";
+      pqxx::result result = txn.exec(query);
+      txn.commit();
+      for (auto row : result) {
+        schema::TraceEdge edge;
+        edge.trace_id = to_bits256(row[0].as<std::string>());
+        edge.msg_hash = to_bits256(row[1].as<std::string>());
+        if (!row[2].is_null()) {
+          edge.left_tx = to_bits256(row[2].as<std::string>());
+        }
+        if (!row[3].is_null()) {
+          edge.right_tx = to_bits256(row[3].as<std::string>());
+        }
+        edge.type = schema::TraceEdge::Type::ord;
+        edge.incomplete = row[4].as<bool>();
+        if (edge.incomplete != true) {
+          LOG(ERROR) << "Error in request. Got non-pending edge!";
+        }
+        edge.broken = row[5].as<bool>();
+
+        state.pending_edges_.push_back(std::move(edge));
+      }
+    }
+    promise.set_value(std::move(state));
+  } catch (const std::exception &e) {
+    promise.set_error(td::Status::Error(ErrorCode::DB_ERROR, PSLICE() << "Error selecting from PG: " << e.what()));
+  }
+}
+
 void InsertManagerPostgres::create_insert_actor(std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise) {
   td::actor::create_actor<InsertBatchPostgres>("insert_batch_postgres", credential_, std::move(insert_tasks), std::move(promise), max_data_depth_).release();
 }
