@@ -10,8 +10,10 @@ RUN apt update -y \
 COPY external/ /app/external/
 COPY tondb-scanner/ /app/tondb-scanner/
 COPY ton-index-postgres/ /app/ton-index-postgres/
+COPY ton-index-postgres-v2/ /app/ton-index-postgres-v2/
 COPY ton-index-clickhouse/ /app/ton-index-clickhouse/
 COPY ton-integrity-checker/ /app/ton-integrity-checker/
+COPY sandbox-cpp/ /app/sandbox-cpp/
 COPY CMakeLists.txt /app/
 
 
