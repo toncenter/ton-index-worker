@@ -80,7 +80,7 @@ schema::Trace TraceImpl::to_schema() const {
 }
 
 TraceImplPtr TraceImpl::from_schema(const schema::Trace& trace) {
-    TraceImplPtr trace_impl;
+    TraceImplPtr trace_impl = std::make_shared<TraceImpl>();
     trace_impl->trace_id = trace.trace_id;
     trace_impl->external_hash = trace.external_hash;
     trace_impl->mc_seqno_start = trace.mc_seqno_start;
