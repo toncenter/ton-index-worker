@@ -21,11 +21,9 @@ void TraceInterfaceDetector::start_up() {
         }
         block::StdAddress address{current.account->workchain, current.account->addr};
 
-        using Detector = InterfacesDetector<JettonWalletDetectorR, JettonMasterDetectorR, NftItemDetectorR, NftCollectionDetectorR>;
-
-        td::actor::create_actor<Detector>
+        td::actor::create_actor<Trace::Detector>
             ("InterfacesDetector", address, current.account->code, current.account->data, shard_states_, config_, 
-            td::PromiseCreator::lambda([SelfId = actor_id(this), &current, promise = ig.get_promise()](std::vector<typename Detector::DetectedInterface> interfaces) mutable {
+            td::PromiseCreator::lambda([SelfId = actor_id(this), &current, promise = ig.get_promise()](std::vector<typename Trace::Detector::DetectedInterface> interfaces) mutable {
                 current.interfaces = std::move(interfaces);
                 promise.set_value(td::Unit());
         })).release();

@@ -3,10 +3,7 @@
 #include <td/actor/actor.h>
 #include <mc-config.h>
 
-
-
 using AllShardStates = std::vector<td::Ref<vm::Cell>>;
-
 
 class JettonWalletDetectorR: public td::actor::Actor {
 public:

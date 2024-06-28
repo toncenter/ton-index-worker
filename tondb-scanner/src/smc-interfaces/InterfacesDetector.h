@@ -3,8 +3,8 @@
 #include <td/actor/actor.h>
 #include "td/actor/MultiPromise.h"
 #include <mc-config.h>
-#include "Jettons.h"
-#include "convert-utils.h"
+#include "Tokens.h"
+#include "NftSale.h"
 
 template<typename... Detectors>
 class InterfacesDetector: public td::actor::Actor {
@@ -56,7 +56,7 @@ private:
   void detect_interface(td::Promise<td::Unit> promise) {
     auto P = td::PromiseCreator::lambda([&, SelfId = actor_id(this), promise = std::move(promise)](td::Result<typename Detector::Result> data) mutable {
       if (data.is_ok()) {
-        LOG(DEBUG) << "Detected interface " << typeid(typename Detector::Result).name() << " for " << convert::to_raw_address(address_);
+        LOG(DEBUG) << "Detected interface " << typeid(typename Detector::Result).name() << " for " << address_;
         send_lambda(SelfId, [this, data = data.move_as_ok(), promise = std::move(promise)]() mutable {
           found_interfaces_->push_back(data);
           promise.set_value(td::Unit());

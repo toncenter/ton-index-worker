@@ -17,7 +17,12 @@ struct Trace {
     bool emulated;
 
     std::unique_ptr<block::Account> account;
-    std::optional<std::vector<typename InterfacesDetector<JettonWalletDetectorR, JettonMasterDetectorR, NftItemDetectorR, NftCollectionDetectorR>::DetectedInterface>> interfaces;
+
+    using Detector = InterfacesDetector<JettonWalletDetectorR, JettonMasterDetectorR, 
+                                        NftItemDetectorR, NftCollectionDetectorR,
+                                        GetGemsNftFixPriceSale, GetGemsNftAuction>;
+                                        
+    std::optional<std::vector<typename Detector::DetectedInterface>> interfaces;
 
     ~Trace() {
         for (Trace* child : children) {

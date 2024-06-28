@@ -637,14 +637,54 @@ struct NftCollectionSchema {
 
   MSGPACK_DEFINE(address, next_item_index, owner_address, collection_content);
 };
+struct GetGemsNftFixPriceSaleSchema {
+  block::StdAddress address;
+  bool is_complete;
+  uint32_t created_at;
+  block::StdAddress marketplace_address;
+  block::StdAddress nft_address;
+  std::optional<block::StdAddress> nft_owner_address;
+  td::RefInt256 full_price;
+  block::StdAddress marketplace_fee_address;
+  td::RefInt256 marketplace_fee;
+  block::StdAddress royalty_address;
+  td::RefInt256 royalty_amount;
+
+  MSGPACK_DEFINE(address, is_complete, created_at, marketplace_address, nft_address, nft_owner_address, full_price, marketplace_fee_address, marketplace_fee, royalty_address, royalty_amount);
+};
+struct GetGemsNftAuctionSchema {
+  block::StdAddress address;
+  bool end;
+  uint32_t end_time;
+  block::StdAddress mp_addr;
+  block::StdAddress nft_addr;
+  std::optional<block::StdAddress> nft_owner;
+  td::RefInt256 last_bid;
+  std::optional<block::StdAddress> last_member;
+  uint32_t min_step;
+  block::StdAddress mp_fee_addr;
+  uint32_t mp_fee_factor, mp_fee_base;
+  block::StdAddress royalty_fee_addr;
+  uint32_t royalty_fee_factor, royalty_fee_base;
+  td::RefInt256 max_bid;
+  td::RefInt256 min_bid;
+  uint32_t created_at;
+  uint32_t last_bid_at;
+  bool is_canceled;
+
+  MSGPACK_DEFINE(address, end, end_time, mp_addr, nft_addr, nft_owner, last_bid, last_member, min_step, mp_fee_addr, mp_fee_factor, mp_fee_base, royalty_fee_addr, royalty_fee_factor, royalty_fee_base, max_bid, min_bid, created_at, last_bid_at, is_canceled);
+};
 
 struct AddressInterfaces {
-  std::vector<std::variant<JettonWalletSchema, JettonMasterSchema, NftItemSchema, NftCollectionSchema>> interfaces;
+  std::vector<std::variant<JettonWalletSchema, JettonMasterSchema, NftItemSchema, NftCollectionSchema, GetGemsNftFixPriceSaleSchema, GetGemsNftAuctionSchema>> interfaces;
 
   MSGPACK_DEFINE(interfaces);
 };
 
-AddressInterfaces parse_interfaces(std::vector<std::variant<JettonWalletDetectorR::Result, JettonMasterDetectorR::Result, NftItemDetectorR::Result, NftCollectionDetectorR::Result>> interfaces) {
+template <class... T>
+constexpr bool always_false = false;
+
+AddressInterfaces parse_interfaces(std::vector<typename Trace::Detector::DetectedInterface> interfaces) {
   AddressInterfaces result;
   for (const auto& interface : interfaces) {
     std::visit([&](auto&& arg) {
@@ -681,6 +721,45 @@ AddressInterfaces parse_interfaces(std::vector<std::variant<JettonWalletDetector
         schema.owner_address = arg.owner_address;
         schema.collection_content = arg.collection_content;
         result.interfaces.push_back(schema);
+      } else if constexpr (std::is_same_v<T, GetGemsNftFixPriceSale::Result>) {
+        GetGemsNftFixPriceSaleSchema schema;
+        schema.address = arg.address;
+        schema.is_complete = arg.is_complete;
+        schema.created_at = arg.created_at;
+        schema.marketplace_address = arg.marketplace_address;
+        schema.nft_address = arg.nft_address;
+        schema.nft_owner_address = arg.nft_owner_address;
+        schema.full_price = arg.full_price;
+        schema.marketplace_fee_address = arg.marketplace_fee_address;
+        schema.marketplace_fee = arg.marketplace_fee;
+        schema.royalty_address = arg.royalty_address;
+        schema.royalty_amount = arg.royalty_amount;
+        result.interfaces.push_back(schema);
+      } else if constexpr (std::is_same_v<T, GetGemsNftAuction::Result>) {
+        GetGemsNftAuctionSchema schema;
+        schema.address = arg.address;
+        schema.end = arg.end;
+        schema.end_time = arg.end_time;
+        schema.mp_addr = arg.mp_addr;
+        schema.nft_addr = arg.nft_addr;
+        schema.nft_owner = arg.nft_owner;
+        schema.last_bid = arg.last_bid;
+        schema.last_member = arg.last_member;
+        schema.min_step = arg.min_step;
+        schema.mp_fee_addr = arg.mp_fee_addr;
+        schema.mp_fee_factor = arg.mp_fee_factor;
+        schema.mp_fee_base = arg.mp_fee_base;
+        schema.royalty_fee_addr = arg.royalty_fee_addr;
+        schema.royalty_fee_factor = arg.royalty_fee_factor;
+        schema.royalty_fee_base = arg.royalty_fee_base;
+        schema.max_bid = arg.max_bid;
+        schema.min_bid = arg.min_bid;
+        schema.created_at = arg.created_at;
+        schema.last_bid_at = arg.last_bid_at;
+        schema.is_canceled = arg.is_canceled;
+        result.interfaces.push_back(schema);
+      } else {
+        static_assert(always_false<T>, "non-exhaustive visitor!");
       }
     }, interface);
   }
