@@ -3,7 +3,7 @@
 
 
 QueueState InsertTaskStruct::get_queue_state() {
-    QueueState status = {1, static_cast<std::int32_t>(parsed_block_->blocks_.size()), 0, 0};
+    QueueState status = {1, static_cast<std::int32_t>(parsed_block_->blocks_.size()), 0, 0, static_cast<std::int32_t>(parsed_block_->traces_.size())};
     for(const auto& blk : parsed_block_->blocks_) {
         status.txs_ += blk.transactions.size();
         for(const auto& tx : blk.transactions) {
@@ -24,7 +24,6 @@ void InsertManagerBase::alarm() {
     td::actor::send_closure(actor_id(this), &InsertManagerBase::schedule_next_insert_batches, false);
 }
 
-
 void InsertManagerBase::print_info() {
   LOG(INFO) << "Insert manager(parallel=" << max_parallel_insert_actors_
             << ", max_batch_mc_blocks=" << batch_size_.mc_blocks_
@@ -35,7 +34,7 @@ void InsertManagerBase::print_info() {
 }
 
 
-void InsertManagerBase::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueState> queued_promise, td::Promise<td::Unit> inserted_promise) {    
+void InsertManagerBase::insert(std::uint32_t mc_seqno, ParsedBlockPtr block_ds, td::Promise<QueueState> queued_promise, td::Promise<td::Unit> inserted_promise) {
     auto task = InsertTaskStruct{mc_seqno, std::move(block_ds), std::move(inserted_promise)};
     auto status_delta = task.get_queue_state();
     insert_queue_.push(std::move(task));
