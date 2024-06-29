@@ -121,13 +121,16 @@ template <class T>
 class InterfaceStorage {
 public:
   std::unordered_map<std::string, T> cache_{};
+  std::uint64_t req_{0}, miss_{0};
 
   void check(block::StdAddress address, td::Promise<T> promise) {
+    ++req_;
     auto it = cache_.find(convert::to_raw_address(address));
     if (it != cache_.end()) {
       auto res = it->second;
       promise.set_value(std::move(res));
     } else {
+      ++miss_;
       promise.set_error(td::Status::Error(ErrorCode::ENTITY_NOT_FOUND));
     }
   }
