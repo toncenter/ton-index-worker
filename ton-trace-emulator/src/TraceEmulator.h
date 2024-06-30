@@ -22,7 +22,7 @@ struct Trace {
                                         NftItemDetectorR, NftCollectionDetectorR,
                                         GetGemsNftFixPriceSale, GetGemsNftAuction>;
                                         
-    std::optional<std::vector<typename Detector::DetectedInterface>> interfaces;
+    std::vector<typename Detector::DetectedInterface> interfaces;
 
     ~Trace() {
         for (Trace* child : children) {
@@ -59,7 +59,7 @@ struct Trace {
         block::gen::TransactionDescr::Record_trans_ord descr;
         tlb::unpack_cell(transaction_root, trans);
         tlb::unpack_cell(trans.description, descr);
-        ss << "TX acc=" << trans.account_addr.to_hex() << " lt=" << trans.lt << " outmsg_cnt=" << trans.outmsg_cnt << " aborted=" << descr.aborted << " int_count: " << (interfaces.has_value() ? interfaces.value().size() : -1) << std::endl;
+        ss << "TX acc=" << trans.account_addr.to_hex() << " lt=" << trans.lt << " outmsg_cnt=" << trans.outmsg_cnt << " aborted=" << descr.aborted << " int_count: " << interfaces.size() << std::endl;
 
         for (const auto child : children) {
             ss << child->to_string(tabs + 1);

@@ -327,7 +327,7 @@ void McBlockEmulator::trace_error(td::Bits256 tx_hash, TraceId trace_id, td::Sta
 
 void McBlockEmulator::trace_received(td::Bits256 tx_hash, Trace *trace) {
     LOG(INFO) << "Emulated trace " << trace->id.to_hex() << " from tx " << tx_hash.to_hex() << ": " << trace->transactions_count() << " transactions, " << trace->depth() << " depth";
-    if (true) { // interface detection enabled
+    if constexpr (std::variant_size_v<Trace::Detector::DetectedInterface> > 0) {
         auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<std::unique_ptr<Trace>> R) {
             if (R.is_error()) {
                 td::actor::send_closure(SelfId, &McBlockEmulator::trace_interfaces_error, trace_id, R.move_as_error());

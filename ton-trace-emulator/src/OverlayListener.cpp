@@ -131,7 +131,7 @@ void OverlayListener::trace_error(TraceId trace_id, td::Status error) {
 
 void OverlayListener::trace_received(TraceId trace_id, Trace *trace) {
     LOG(INFO) << "Emulated trace from ext msg " << trace_id.to_hex() << ": " << trace->transactions_count() << " transactions, " << trace->depth() << " depth";
-    if (true) {
+    if constexpr (std::variant_size_v<Trace::Detector::DetectedInterface> > 0) {
         auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<std::unique_ptr<Trace>> R) {
             if (R.is_error()) {
                 td::actor::send_closure(SelfId, &OverlayListener::trace_interfaces_error, trace_id, R.move_as_error());

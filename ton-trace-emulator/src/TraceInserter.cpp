@@ -38,20 +38,14 @@ void TraceInserter::start_up() {
             auto by_addr_key = trace_->id.to_hex() + ":" + tx.in_msg.value().hash.to_hex();
             redis_.zadd(addr_raw, {std::make_pair(by_addr_key, tx.lt)});
 
-            if (current.interfaces.has_value()) {
-                addr_interfaces[addr_raw] = current.interfaces;
-            } else {
-                LOG(ERROR) << "No interfaces for " << addr_raw;
-            }
+            addr_interfaces[addr_raw] = current.interfaces;
         }
 
         for (const auto& [addr_raw, interfaces] : addr_interfaces) {
-            if (interfaces.has_value()) {
-                auto interfaces_redis = parse_interfaces(interfaces.value());
-                std::stringstream buffer;
-                msgpack::pack(buffer, interfaces_redis);
-                redis_.hset(trace_->id.to_hex(), addr_raw, buffer.str());
-            }
+            auto interfaces_redis = parse_interfaces(interfaces);
+            std::stringstream buffer;
+            msgpack::pack(buffer, interfaces_redis);
+            redis_.hset(trace_->id.to_hex(), addr_raw, buffer.str());
         }
 
         redis_.publish("new_trace", trace_->id.to_hex());
