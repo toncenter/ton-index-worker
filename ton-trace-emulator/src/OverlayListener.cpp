@@ -1,7 +1,6 @@
 
 #include "OverlayListener.h"
 #include <tdutils/td/utils/filesystem.h>
-#include "TraceInserter.h"
 #include "TraceInterfaceDetector.h"
 
 

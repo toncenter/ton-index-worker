@@ -3,7 +3,6 @@
 #include <string>
 #include <emulator/transaction-emulator.h>
 #include "TraceEmulator.h"
-#include "TraceInserter.h"
 
 
 void TraceEmulator::set_error(td::Status error) {

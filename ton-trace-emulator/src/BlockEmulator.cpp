@@ -1,5 +1,4 @@
 #include "BlockEmulator.h"
-#include "TraceInserter.h"
 #include "TraceInterfaceDetector.h"
 
 class BlockParser: public td::actor::Actor {
