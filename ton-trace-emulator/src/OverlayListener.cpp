@@ -137,12 +137,12 @@ void OverlayListener::trace_received(TraceId trace_id, Trace *trace) {
                 td::actor::send_closure(SelfId, &OverlayListener::trace_interfaces_error, trace_id, R.move_as_error());
                 return;
             }
-            td::actor::send_closure(SelfId, &OverlayListener::insert_trace, R.move_as_ok());
+            td::actor::send_closure(SelfId, &OverlayListener::finish_processing, R.move_as_ok());
         });
 
         td::actor::create_actor<TraceInterfaceDetector>("TraceInterfaceDetector", shard_states_, config_, std::unique_ptr<Trace>(trace), std::move(P)).release();
     } else {
-        insert_trace(std::unique_ptr<Trace>(trace));
+        finish_processing(std::unique_ptr<Trace>(trace));
     }
 }
 
@@ -150,22 +150,8 @@ void OverlayListener::trace_interfaces_error(TraceId trace_id, td::Status error)
     LOG(ERROR) << "Failed to detect interfaces on trace_id " << trace_id.to_hex() << ": " << error;
 }
 
-void OverlayListener::insert_trace(std::unique_ptr<Trace> trace) {
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<td::Unit> R) {
-        if (R.is_error()) {
-            td::actor::send_closure(SelfId, &OverlayListener::trace_insert_failed, trace_id, R.move_as_error());
-            return;
-        }
-        td::actor::send_closure(SelfId, &OverlayListener::trace_inserted, trace_id);
-    });
-    td::actor::create_actor<TraceInserter>("TraceInserter", std::move(trace), std::move(P)).release();
-}
-
-void OverlayListener::trace_insert_failed(TraceId trace_id, td::Status error) {
-    LOG(ERROR) << "Failed to insert trace " << trace_id.to_hex() << ": " << error;
-}
-
-void OverlayListener::trace_inserted(TraceId trace_id) {
+void OverlayListener::finish_processing(std::unique_ptr<Trace> trace) {
+    LOG(INFO) << "Finished emulating trace " << trace->id.to_hex();
+    trace_processor_(std::move(trace));
     traces_cnt_++;
-    LOG(INFO) << "Inserted trace " << trace_id.to_hex() << " (" << traces_cnt_ << " traces inserted)";
 }

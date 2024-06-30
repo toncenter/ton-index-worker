@@ -26,6 +26,7 @@ struct TransactionInfo {
 class McBlockEmulator: public td::actor::Actor {
 private:
     MasterchainBlockDataState mc_data_state_;
+    std::function<void(std::unique_ptr<Trace>)> trace_processor_;
     td::Promise<> promise_;
     size_t blocks_left_to_parse_;
     std::vector<TransactionInfo> txs_;
@@ -53,14 +54,12 @@ private:
     void trace_error(td::Bits256 tx_hash, TraceId trace_id, td::Status error);
     void trace_received(td::Bits256 tx_hash, Trace *trace);
     void trace_interfaces_error(TraceId trace_id, td::Status error);
-    void insert_trace(std::unique_ptr<Trace> trace);
-    void trace_insert_failed(td::Bits256 trace_id, td::Status error);
-    void trace_inserted(TraceId trace_id);
+    void finish_processing(std::unique_ptr<Trace> trace);
 
     td::Result<block::Account> fetch_account(const block::StdAddress& addr, ton::UnixTime now);
 
 public:
-    McBlockEmulator(MasterchainBlockDataState mc_data_state, td::Promise<> promise);
+    McBlockEmulator(MasterchainBlockDataState mc_data_state, std::function<void(std::unique_ptr<Trace>)> trace_processor, td::Promise<> promise);
 
     virtual void start_up() override;
 };

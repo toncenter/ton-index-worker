@@ -4,6 +4,7 @@
 #include "DbScanner.h"
 #include "OverlayListener.h"
 #include "TraceEmulator.h"
+#include "TraceInserter.h"
 
 
 class TraceEmulatorScheduler : public td::actor::Actor {
@@ -11,6 +12,7 @@ class TraceEmulatorScheduler : public td::actor::Actor {
     td::actor::ActorId<DbScanner> db_scanner_;
     std::string global_config_path_;
     std::string inet_addr_;
+    std::function<void(std::unique_ptr<Trace>)> insert_trace_;
 
     ton::BlockSeqno last_known_seqno_{0};
 
@@ -32,7 +34,17 @@ class TraceEmulatorScheduler : public td::actor::Actor {
 
   public:
     TraceEmulatorScheduler(td::actor::ActorId<DbScanner> db_scanner, std::string global_config_path, std::string inet_addr) :
-        db_scanner_(db_scanner), global_config_path_(global_config_path), inet_addr_(inet_addr) {};
+        db_scanner_(db_scanner), global_config_path_(global_config_path), inet_addr_(inet_addr) {
+      insert_trace_ = [](std::unique_ptr<Trace> trace) {
+        auto P = td::PromiseCreator::lambda([trace_id = trace->id](td::Result<td::Unit> R) {
+          if (R.is_error()) {
+            LOG(ERROR) << "Failed to insert trace " << trace_id.to_hex() << ": " << R.move_as_error();
+          }
+          LOG(DEBUG) << "Successfully inserted trace " << trace_id.to_hex();
+        });
+        td::actor::create_actor<TraceInserter>("TraceInserter", std::move(trace), std::move(P)).release();
+      };
+    };
 
     virtual void start_up() override;
 };

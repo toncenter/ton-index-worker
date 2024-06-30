@@ -1,5 +1,6 @@
 #include "TraceScheduler.h"
 #include "BlockEmulator.h"
+#include "TraceInserter.h"
 
 
 void TraceEmulatorScheduler::start_up() {
@@ -8,7 +9,7 @@ void TraceEmulatorScheduler::start_up() {
     if (global_config_path_.empty() || inet_addr_.empty()) {
         LOG(WARNING) << "Global config path or inet addr is empty. OverlayListener was not started.";
     } else {
-        overlay_listener_ = td::actor::create_actor<OverlayListener>("OverlayListener", global_config_path_, inet_addr_);
+        overlay_listener_ = td::actor::create_actor<OverlayListener>("OverlayListener", global_config_path_, inet_addr_, insert_trace_);
     }
 }
 
@@ -60,7 +61,9 @@ void TraceEmulatorScheduler::seqno_fetched(std::uint32_t seqno, MasterchainBlock
         }
         LOG(INFO) << "Success emulating mc block " << blkid.to_str();
     });
-    td::actor::create_actor<McBlockEmulator>("McBlockEmulator", mc_data_state, std::move(P)).release();
+
+
+    td::actor::create_actor<McBlockEmulator>("McBlockEmulator", mc_data_state, insert_trace_, std::move(P)).release();
 }
 
 int seqno = 37786481;
@@ -72,10 +75,10 @@ void TraceEmulatorScheduler::alarm() {
             std::_Exit(2);
             return;
         }
-        td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, R.move_as_ok());
-        // td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, seqno++); // for debugging
+        // td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, R.move_as_ok());
+        td::actor::send_closure(SelfId, &TraceEmulatorScheduler::got_last_mc_seqno, seqno++); // for debugging
     });
     td::actor::send_closure(db_scanner_, &DbScanner::get_last_mc_seqno, std::move(P));
 
-    alarm_timestamp() = td::Timestamp::in(4.0);
+    alarm_timestamp() = td::Timestamp::in(2.0);
 }

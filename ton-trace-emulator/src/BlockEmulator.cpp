@@ -107,8 +107,8 @@ public:
     }
 };
 
-McBlockEmulator::McBlockEmulator(MasterchainBlockDataState mc_data_state, td::Promise<> promise)
-    : mc_data_state_(std::move(mc_data_state)), promise_(std::move(promise)), blocks_left_to_parse_(mc_data_state_.shard_blocks_diff_.size()) {
+McBlockEmulator::McBlockEmulator(MasterchainBlockDataState mc_data_state, std::function<void(std::unique_ptr<Trace>)> trace_processor, td::Promise<> promise)
+    : mc_data_state_(std::move(mc_data_state)), trace_processor_(std::move(trace_processor)), promise_(std::move(promise)), blocks_left_to_parse_(mc_data_state_.shard_blocks_diff_.size()) {
         auto libraries_root = mc_data_state_.config_->get_libraries_root();
         emulator_ = std::make_shared<emulator::TransactionEmulator>(mc_data_state_.config_, 0);
         emulator_->set_libs(vm::Dictionary(libraries_root, 256));
@@ -199,10 +199,10 @@ void McBlockEmulator::emulate_traces() {
             continue;
         }
 
+        // for debugging
         // if (tx.hash.to_hex() != "36F63618F374305C85AAEF856E4EE055540FA6F199453F8F2D347C199F7FDBB2") {
         //     continue;
         // }
-
         // if (tx.initial_msg_hash.value().to_hex() != "A97D033AF645F4D1BE66EFFCCA441D570A1867BED666FC462A55FC620EE8EE18") {
         //     continue;
         // }
@@ -319,7 +319,6 @@ void McBlockEmulator::create_trace(const TransactionInfo& tx, td::Promise<Trace 
     }
 }
 
-
 void McBlockEmulator::trace_error(td::Bits256 tx_hash, TraceId trace_id, td::Status error) {
     LOG(ERROR) << "Failed to emulate trace_id " << trace_id.to_hex() << " from tx " << tx_hash.to_hex() << ": " << error;
     trace_ids_in_progress_.erase(trace_id);
@@ -333,17 +332,12 @@ void McBlockEmulator::trace_received(td::Bits256 tx_hash, Trace *trace) {
                 td::actor::send_closure(SelfId, &McBlockEmulator::trace_interfaces_error, trace_id, R.move_as_error());
                 return;
             }
-            td::actor::send_closure(SelfId, &McBlockEmulator::insert_trace, R.move_as_ok());
+            td::actor::send_closure(SelfId, &McBlockEmulator::finish_processing, R.move_as_ok());
         });
 
-        AllShardStates shard_states;
-        for (const auto &shard_ds : mc_data_state_.shard_blocks_) {
-            shard_states.push_back(shard_ds.block_state);
-        }
-
-        td::actor::create_actor<TraceInterfaceDetector>("TraceInterfaceDetector", std::move(shard_states), mc_data_state_.config_, std::unique_ptr<Trace>(trace), std::move(P)).release();
+        td::actor::create_actor<TraceInterfaceDetector>("TraceInterfaceDetector", shard_states_, mc_data_state_.config_, std::unique_ptr<Trace>(trace), std::move(P)).release();
     } else {
-        insert_trace(std::unique_ptr<Trace>(trace));
+        finish_processing(std::unique_ptr<Trace>(trace));
     }
 }
 
@@ -352,28 +346,17 @@ void McBlockEmulator::trace_interfaces_error(TraceId trace_id, td::Status error)
     trace_ids_in_progress_.erase(trace_id);
 }
 
-void McBlockEmulator::insert_trace(std::unique_ptr<Trace> trace) {
+void McBlockEmulator::finish_processing(std::unique_ptr<Trace> trace) {
     LOG(INFO) << trace->to_string();
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), trace_id = trace->id](td::Result<td::Unit> R) {
-        if (R.is_error()) {
-            td::actor::send_closure(SelfId, &McBlockEmulator::trace_insert_failed, trace_id, R.move_as_error());
-            return;
-        }
-        td::actor::send_closure(SelfId, &McBlockEmulator::trace_inserted, trace_id);
-    });
-    td::actor::create_actor<TraceInserter>("TraceInserter", std::move(trace), std::move(P)).release();
-}
+    auto trace_id = trace->id;
+    
+    trace_processor_(std::move(trace));
 
-void McBlockEmulator::trace_insert_failed(td::Bits256 trace_id, td::Status error) {
-    LOG(ERROR) << "Failed to insert trace " << trace_id.to_hex() << ": " << error;
-    trace_ids_in_progress_.erase(trace_id);
-}
-
-void McBlockEmulator::trace_inserted(TraceId trace_id) {
     trace_ids_in_progress_.erase(trace_id);
     traces_cnt_++;
     if (trace_ids_in_progress_.empty()) {
-        LOG(INFO) << "Finished emulating and inserting " << traces_cnt_ << " traces in " << (td::Timestamp::now().at() - start_time_.at()) * 1000 << " ms";
+        auto blkid = mc_data_state_.shard_blocks_[0].block_data->block_id().id;
+        LOG(INFO) << "Finished emulating block " << blkid.to_str() << ": " << traces_cnt_ << " traces in " << (td::Timestamp::now().at() - start_time_.at()) * 1000 << " ms";
         promise_.set_value(td::Unit());
         stop();
     }
