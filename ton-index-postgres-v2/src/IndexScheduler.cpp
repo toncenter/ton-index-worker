@@ -35,7 +35,7 @@ std::string get_time_string(double seconds) {
 
 void IndexScheduler::alarm() {
     alarm_timestamp() = td::Timestamp::in(1.0);
-    std::double_t alpha = 0.9;
+    std::double_t alpha = 0.99;
     if (last_existing_seqno_count_ == 0) 
         last_existing_seqno_count_ = existing_seqnos_.size();
     avg_tps_ = alpha * avg_tps_ + (1 - alpha) * (existing_seqnos_.size() - last_existing_seqno_count_);
@@ -93,6 +93,8 @@ void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> 
             if (value == next_seqno) {
                 ++next_seqno;
                 existing_seqnos_.insert(value);
+            } else {
+                break;
             }
         }
         LOG(INFO) << "Accepted " << existing_seqnos_.size() << " of " << seqnos_.size() 
@@ -254,7 +256,7 @@ void IndexScheduler::schedule_next_seqnos() {
     if(to_seqno_ > 0 && last_known_seqno_ > to_seqno_ 
        && queued_seqnos_.empty() && processing_seqnos_.empty()
        && cur_queue_state_.blocks_ == 0) {
-        stop();
+        // stop();
         return;
     }
 }

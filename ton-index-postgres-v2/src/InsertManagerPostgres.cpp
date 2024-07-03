@@ -53,10 +53,36 @@ struct BitArrayHasher {
   }
 };
 
+template <>
+struct std::hash<td::Bits256>
+{
+  std::size_t operator()(const td::Bits256& k) const {
+    std::size_t seed = 0;
+    for(const auto& el : k.as_array()) {
+        seed ^= std::hash<td::uint8>{}(el) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};
+
+template <>
+struct std::hash<std::pair<td::Bits256, td::Bits256>>
+{
+  std::size_t operator()(const std::pair<td::Bits256, td::Bits256>& k) const {
+    std::size_t seed = 0;
+    for(const auto& el : k.first.as_array()) {
+        seed ^= std::hash<td::uint8>{}(el) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    for(const auto& el : k.second.as_array()) {
+        seed ^= std::hash<td::uint8>{}(el) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};
 
 // This set is used as a synchronization mechanism to prevent multiple queries for the same message
 // Otherwise Posgres will throw an error deadlock_detected
-std::unordered_set<td::Bits256, BitArrayHasher> msg_bodies_in_progress;
+std::unordered_set<td::Bits256> msg_bodies_in_progress;
 std::mutex messages_in_progress_mutex;
 std::mutex latest_account_states_update_mutex;
 
@@ -1438,8 +1464,8 @@ std::string InsertBatchPostgres::insert_traces(pqxx::work &txn) {
   bool is_first_trace = true;
   bool is_first_edge = true;
 
-  std::unordered_map<td::Bits256, schema::Trace, BitArrayHasher> traces_map;
-  std::unordered_map<td::Bits256, schema::TraceEdge, BitArrayHasher> edges_map;
+  std::unordered_map<td::Bits256, schema::Trace> traces_map;
+  std::unordered_map<std::pair<td::Bits256, td::Bits256>, schema::TraceEdge> edges_map;
   for (const auto& task : insert_tasks_) {
     for(auto &trace : task.parsed_block_->traces_) {
       {
@@ -1451,11 +1477,12 @@ std::string InsertBatchPostgres::insert_traces(pqxx::work &txn) {
         }
       }
       for(auto &edge : trace.edges) {
-        auto it = edges_map.find(edge.msg_hash);
-        if (it != edges_map.end() && it->second.incomplete < edge.incomplete) {
+        auto key = std::make_pair(edge.trace_id, edge.msg_hash);
+        auto it = edges_map.find(key);
+        if (it != edges_map.end() && it->second.incomplete && !edge.incomplete) {
           it->second = edge;
         } else {
-          edges_map.insert({edge.msg_hash, edge});
+          edges_map.insert({key, edge});
         }
       }
     }
@@ -1511,11 +1538,13 @@ std::string InsertBatchPostgres::insert_traces(pqxx::work &txn) {
   }
   if (!is_first_edge) {
     edges_query << " ON CONFLICT (trace_id, msg_hash) DO UPDATE SET "
+                << "trace_id = EXCLUDED.trace_id, "
+                << "msg_hash = EXCLUDED.msg_hash, "
                 << "left_tx = EXCLUDED.left_tx, "
                 << "right_tx = EXCLUDED.right_tx, "
                 << "incomplete = EXCLUDED.incomplete, "
                 << "broken = EXCLUDED.broken "
-                << "WHERE not EXCLUDED.incomplete and not EXCLUDED.broken;\n";
+                << "WHERE trace_edges.incomplete is true and EXCLUDED.incomplete is false and EXCLUDED.broken is false;\n";
     full_query += edges_query.str();
   }
   return full_query;

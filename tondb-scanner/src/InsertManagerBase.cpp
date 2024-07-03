@@ -78,10 +78,11 @@ void InsertManagerBase::schedule_next_insert_batches(bool full_batch = false)
         });
         
         ++parallel_insert_actors_;
-        // LOG(INFO) << "Inserting batch[mb=" << batch_state.mc_blocks_ 
-        //           << ", b=" << batch_state.blocks_ 
-        //           << ", txs=" << batch_state.txs_
-        //           << ", msgs=" << batch_state.msgs_ << "]";
+        LOG(INFO) << "Inserting batch[mb=" << batch_state.mc_blocks_ 
+                  << ", b=" << batch_state.blocks_ 
+                  << ", txs=" << batch_state.txs_
+                  << ", msgs=" << batch_state.msgs_ 
+                  << ", traces=" << batch_state.traces_ << "]";
         create_insert_actor(std::move(batch), std::move(P));
     }
 }

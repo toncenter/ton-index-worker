@@ -108,7 +108,6 @@ void TraceAssembler::alarm() {
 
     LOG(INFO) << " Pending traces: " << pending_traces_.size()
               << " Pending edges: " << pending_edges_.size()
-              << " Found edges: " << edges_found_.size()
               << " Broken traces: " << broken_count_;
 }
 
@@ -167,15 +166,20 @@ void TraceAssembler::process_block(std::int32_t seqno, ParsedBlockPtr block) {
         if (lhs.get().lt != rhs.get().lt) {
             return lhs.get().lt < rhs.get().lt;
         }
-        return (convert::to_raw_address(lhs.get().account) < convert::to_raw_address(rhs.get().account));
+        if (lhs.get().account.workchain != rhs.get().account.workchain) {
+            return (lhs.get().account.workchain < rhs.get().account.workchain);
+        }
+        return (lhs.get().account.addr < rhs.get().account.addr);
     });
 
     // process transactions
+    std::vector<TraceEdgeImpl> edges_found_;
+    std::unordered_set<td::Bits256, Bits256Hasher> updated_traces_;
+    std::unordered_set<td::Bits256, Bits256Hasher> updated_edges_;
     for(auto &tx : sorted_txs) {
-        process_transaction(seqno, tx.get());
+        process_transaction(seqno, tx.get(), edges_found_, updated_traces_, updated_edges_);
     }
-    std::unordered_map<td::Bits256, std::size_t, Bits256Hasher> trace_map;
-    std::vector<schema::Trace> traces;
+    std::unordered_map<td::Bits256, schema::Trace, Bits256Hasher> trace_map;
     for (auto & trace_id : updated_traces_) {
         auto trace = pending_traces_[trace_id];
         if(trace->pending_edges_ == 0) {
@@ -186,8 +190,7 @@ void TraceAssembler::process_block(std::int32_t seqno, ParsedBlockPtr block) {
         } else if (trace->pending_edges_ < 0) {
             trace->state = TraceImpl::State::broken;
         }
-        traces.push_back(trace->to_schema());
-        trace_map[trace_id] = traces.size() - 1;
+        trace_map[trace_id] = trace->to_schema();
     }
     for (auto & edge_hash : updated_edges_) {
         auto edge = pending_edges_.find(edge_hash);
@@ -203,18 +206,16 @@ void TraceAssembler::process_block(std::int32_t seqno, ParsedBlockPtr block) {
     }
     for (auto &edge : edges_found_) {
         // update trace
-        auto &trace_schema = traces[trace_map[edge.trace_id]];
+        auto &trace_schema = trace_map[edge.trace_id];
         trace_schema.edges.push_back(edge.to_schema());
     }
-    block->traces_ = std::move(traces);
-
-    // tear down
-    edges_found_.clear();
-    updated_traces_.clear();
-    updated_edges_.clear();
+    for (auto &[_, trace] : trace_map) {
+        block->traces_.push_back(std::move(trace));
+    }
 }
 
-void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction& tx) {
+void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction& tx, std::vector<TraceEdgeImpl>& edges_found_, 
+        std::unordered_set<td::Bits256, Bits256Hasher>& updated_traces_, std::unordered_set<td::Bits256, Bits256Hasher>& updated_edges_) {
     TraceImplPtr trace = nullptr;
     if (tx.in_msg.has_value()) {
         auto &msg = tx.in_msg.value();
@@ -261,6 +262,7 @@ void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction
                 trace->pending_edges_ += edge.incomplete;
                 if(edge.broken) {
                     trace->state = TraceImpl::State::broken;
+                    ++broken_count_;
                 }
                 if (edge.incomplete) {
                     pending_edges_.insert({edge.msg_hash, edge});

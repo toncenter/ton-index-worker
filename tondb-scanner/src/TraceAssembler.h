@@ -93,10 +93,6 @@ class TraceAssembler: public td::actor::Actor {
     // trace assembly
     std::unordered_map<td::Bits256, TraceImplPtr, Bits256Hasher> pending_traces_;
     std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges_;
-    std::vector<TraceEdgeImpl> edges_found_;
-
-    std::unordered_set<td::Bits256, Bits256Hasher> updated_traces_;
-    std::unordered_set<td::Bits256, Bits256Hasher> updated_edges_;
 public:
     TraceAssembler(std::int32_t expected_seqno, bool is_ready = false) : 
         expected_seqno_(expected_seqno), is_ready_(is_ready) {}
@@ -110,5 +106,6 @@ public:
     void alarm() override;
 private:
     void process_block(std::int32_t seqno, ParsedBlockPtr block);
-    void process_transaction(std::int32_t seqno, schema::Transaction& tx);
+    void process_transaction(std::int32_t seqno, schema::Transaction& tx, std::vector<TraceEdgeImpl>& edges_found_, 
+        std::unordered_set<td::Bits256, Bits256Hasher>& updated_traces_, std::unordered_set<td::Bits256, Bits256Hasher>& updated_edges_);
 };
