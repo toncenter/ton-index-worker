@@ -5,7 +5,7 @@
 
 
 void IndexScheduler::start_up() {
-    // event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
+    event_processor_ = td::actor::create_actor<EventProcessor>("event_processor", insert_manager_);
 }
 
 std::string get_time_string(double seconds) {
@@ -45,12 +45,6 @@ void IndexScheduler::alarm() {
         next_print_stats_ = td::Timestamp::in(stats_timeout_);
     }
 
-    // if(out_of_sync_ && next_catch_up_.is_in_past()){
-    //     td::actor::send_closure(db_scanner_, &DbScanner::catch_up_with_primary);
-    //     LOG(INFO) << "Catch up!";
-    //     next_catch_up_ = td::Timestamp::in((out_of_sync_? 30.0 : 1.0));
-    // }
-
     auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueState> R){
         R.ensure();
         td::actor::send_closure(SelfId, &IndexScheduler::got_insert_queue_state, R.move_as_ok());
@@ -71,7 +65,7 @@ void IndexScheduler::run() {
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<std::vector<std::uint32_t>> R) {
         td::actor::send_closure(SelfId, &IndexScheduler::got_existing_seqnos, std::move(R));
     });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P));
+    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P), from_seqno_, to_seqno_);
 }
 
 void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> R) {
@@ -88,12 +82,14 @@ void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> 
 }
 
 void IndexScheduler::got_last_known_seqno(std::uint32_t last_known_seqno) {
+    if (to_seqno_ > 0 && last_known_seqno_ > to_seqno_) 
+        return;
     int skipped_count_ = 0;
     for(auto seqno = last_known_seqno_ + 1; seqno <= last_known_seqno; ++seqno) {
-        if (existing_seqnos_.find(seqno) != existing_seqnos_.end()) {
+        if (!force_index_ && (existing_seqnos_.find(seqno) != existing_seqnos_.end())) {
             ++skipped_count_;
         }
-        else {
+        else if ((from_seqno_ <= 0 || seqno >= from_seqno_) && (to_seqno_ <= 0 || seqno <= to_seqno_)) {
             queued_seqnos_.push(seqno);
         }
     }
@@ -123,8 +119,6 @@ void IndexScheduler::reschedule_seqno(std::uint32_t mc_seqno) {
     LOG(WARNING) << "Rescheduling seqno " << mc_seqno;
     processing_seqnos_.erase(mc_seqno);
     queued_seqnos_.push(mc_seqno);
-
-    // td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
 }
 
 void IndexScheduler::seqno_fetched(std::uint32_t mc_seqno, MasterchainBlockDataState block_data_state) {
@@ -136,23 +130,23 @@ void IndexScheduler::seqno_fetched(std::uint32_t mc_seqno, MasterchainBlockDataS
             td::actor::send_closure(SelfId, &IndexScheduler::reschedule_seqno, mc_seqno);
             return;
         }
-        td::actor::send_closure(SelfId, &IndexScheduler::seqno_interfaces_processed, mc_seqno, R.move_as_ok());
+        td::actor::send_closure(SelfId, &IndexScheduler::seqno_parsed, mc_seqno, R.move_as_ok());
     });
     td::actor::send_closure(parse_manager_, &ParseManager::parse, mc_seqno, std::move(block_data_state), std::move(P));
 }
 
 void IndexScheduler::seqno_parsed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
-    // LOG(DEBUG) << "Parsed seqno " << mc_seqno;
+    LOG(DEBUG) << "Parsed seqno " << mc_seqno;
 
-    // auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno, parsed_block](td::Result<td::Unit> R) {
-    //     if (R.is_error()) {
-    //         LOG(ERROR) << "Failed to process interfaces for  seqno " << mc_seqno << ": " << R.move_as_error();
-    //         td::actor::send_closure(SelfId, &IndexScheduler::reschedule_seqno, mc_seqno);
-    //         return;
-    //     }
-    //     td::actor::send_closure(SelfId, &IndexScheduler::seqno_interfaces_processed, mc_seqno, std::move(parsed_block));
-    // });
-    // td::actor::send_closure(event_processor_, &EventProcessor::process, std::move(parsed_block), std::move(P));
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno, parsed_block](td::Result<td::Unit> R) {
+        if (R.is_error()) {
+            LOG(ERROR) << "Failed to process interfaces for  seqno " << mc_seqno << ": " << R.move_as_error();
+            td::actor::send_closure(SelfId, &IndexScheduler::reschedule_seqno, mc_seqno);
+            return;
+        }
+        td::actor::send_closure(SelfId, &IndexScheduler::seqno_interfaces_processed, mc_seqno, std::move(parsed_block));
+    });
+    td::actor::send_closure(event_processor_, &EventProcessor::process, std::move(parsed_block), std::move(P));
 }
 
 void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
@@ -171,6 +165,27 @@ void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBl
         td::actor::send_closure(SelfId, &IndexScheduler::seqno_queued_to_insert, mc_seqno, R.move_as_ok());
     });
     td::actor::send_closure(insert_manager_, &InsertManagerInterface::insert, mc_seqno, std::move(parsed_block), std::move(Q), std::move(P));
+}
+
+void IndexScheduler::print_stats() {
+    double eta = (last_known_seqno_ - last_indexed_seqno_) / avg_tps_;
+    td::StringBuilder sb;
+    sb << last_indexed_seqno_ << " / "; 
+    auto end_seqno = last_known_seqno_;
+    if (to_seqno_ > 0) {
+        end_seqno = to_seqno_;
+    }
+
+    sb << end_seqno;
+    // if (end_seqno - last_indexed_seqno_ > 100) {
+    //     sb << "(" << double(last_indexed_seqno_ - from_seqno_) / (end_seqno - from_seqno_) * 100 << "%";
+    // }
+    sb << "\t" << avg_tps_ << "/s (" << get_time_string(eta) << ")"
+       << "\tQ[" << cur_queue_state_.mc_blocks_ << "M, " 
+       << cur_queue_state_.blocks_ << "b, " 
+       << cur_queue_state_.txs_ << "t, " 
+       << cur_queue_state_.msgs_ << "m]";
+    LOG(INFO) << sb.as_cslice().str();
 }
 
 void IndexScheduler::seqno_queued_to_insert(std::uint32_t mc_seqno, QueueState status) {
@@ -195,6 +210,7 @@ void IndexScheduler::seqno_inserted(std::uint32_t mc_seqno, td::Unit result) {
     }
 }
 
+#define OUT_OF_SYNC 1000
 void IndexScheduler::schedule_next_seqnos() {
     LOG(DEBUG) << "Scheduling next seqnos. Current tasks: " << processing_seqnos_.size();
     while (!queued_seqnos_.empty() && (processing_seqnos_.size() < max_active_tasks_)) {
@@ -202,28 +218,19 @@ void IndexScheduler::schedule_next_seqnos() {
         queued_seqnos_.pop();
         schedule_seqno(seqno);
     }
-    if(!out_of_sync_ && last_known_seqno_ - last_indexed_seqno_ > 100) {
+    if(!out_of_sync_ && last_known_seqno_ - last_indexed_seqno_ > OUT_OF_SYNC) {
         LOG(INFO) << "Syncronization lost!";
         out_of_sync_ = true;
         td::actor::send_closure(db_scanner_, &DbScanner::set_out_of_sync, out_of_sync_);
     }
-    if(out_of_sync_ && last_known_seqno_ - last_indexed_seqno_ < 100) {
+    if(out_of_sync_ && last_known_seqno_ - last_indexed_seqno_ < OUT_OF_SYNC) {
         LOG(INFO) << "Syncronization complete!";
         out_of_sync_ = false;
         td::actor::send_closure(db_scanner_, &DbScanner::set_out_of_sync, out_of_sync_);
     }
-    if(!queued_seqnos_.empty()) { 
-        td::actor::send_closure(actor_id(this), &IndexScheduler::schedule_next_seqnos);
-    }
-}
 
-void IndexScheduler::print_stats() {
-    double eta = (last_known_seqno_ - last_indexed_seqno_) / avg_tps_;
-    LOG(INFO) << "Last: " << last_indexed_seqno_ << " / " << last_known_seqno_ 
-              << "\tBlk/s: " << avg_tps_
-              << "\tETA: " << get_time_string(eta)
-              << "\tQ[" << cur_queue_state_.mc_blocks_ << "M, " 
-              << cur_queue_state_.blocks_ << "b, " 
-              << cur_queue_state_.txs_ << "t, " 
-              << cur_queue_state_.msgs_ << "m]";
+    if(to_seqno_ > 0 && last_known_seqno_ > to_seqno_ && queued_seqnos_.empty()) {
+        stop();
+        return;
+    }
 }

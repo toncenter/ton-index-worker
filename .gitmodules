@@ -8,6 +8,7 @@
 [submodule "external/clickhouse-cpp"]
 	path = external/clickhouse-cpp
 	url = https://github.com/kdimentionaltree/clickhouse-cpp.git
+  branch = absl-fix
 [submodule "external/hiredis"]
 	path = external/hiredis
 	url = https://github.com/redis/hiredis.git
