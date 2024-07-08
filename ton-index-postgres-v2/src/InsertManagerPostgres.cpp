@@ -1588,9 +1588,15 @@ void InsertManagerPostgres::start_up() {
           "create type status_change_type as enum('unchanged', 'frozen', 'deleted');\n"
           "create type skipped_reason_type as enum('no_state', 'bad_state', 'no_gas', 'suspended');\n"
           "create type bounce_type as enum('negfunds', 'nofunds', 'ok');\n"
-          // "create type trace_edge_type as enum('ord', 'sys', 'ext', 'logs');\n"
           "create type trace_state as enum('complete', 'pending', 'broken');\n"
           "create type msg_direction as enum('out', 'in');\n"
+          "create type trace_classification_state as enum('unclassified', 'failed', 'ok');\n"
+          "create type change_dns_record_details as (key varchar, value_schema varchar, value varchar, flags integer);\n"
+          "create type peer_swap_details as (asset_in varchar, amount_in numeric, asset_out varchar, amount_out numeric);\n"
+          "create type jetton_swap_details as (dex varchar, amount_in numeric, amount_out numeric, peer_swaps peer_swap_details[]);\n"
+          "create type ton_transfer_details as (content text, encrypted boolean);\n"
+          "create type nft_transfer_details as (is_purchase boolean, price numeric, query_id numeric);\n"
+          "create type jetton_transfer_details as (response_address varchar, forward_amount numeric, query_id numeric);\n"
         );
         LOG(DEBUG) << query;
         txn.exec0(query);
@@ -1909,6 +1915,7 @@ void InsertManagerPostgres::start_up() {
       "end_lt bigint, "
       "end_utime integer, "
       "state trace_state, "
+      "classification_state trace_classification_state default 'unclassified', "
       "pending_edges_ bigint, "
       "edges_ bigint, "
       "nodes_ bigint, "
@@ -1928,12 +1935,44 @@ void InsertManagerPostgres::start_up() {
       "foreign key (trace_id) references traces"
       ");\n"
     );
+    
+    query += (
+      "create table if not exists actions ("
+      "trace_id varchar not null, "
+      "action_id varchar not null, "
+      "start_lt bigint, "
+      "end_lt bigint, "
+      "start_utime bigint, "
+      "end_utime bigint, "
+      "source varchar, "
+      "source_secondary varchar, "
+      "destination varchar, "
+      "destination_secondary varchar, "
+      "asset varchar, "
+      "asset_secondary varchar, "
+      "asset2 varchar, "
+      "asset2_secondary varchar, "
+      "opcode bigint, "
+      "tx_hashes varchar[], "
+      "type varchar, "
+      "ton_transfer_data ton_transfer_details, "
+      "value numeric, "
+      "jetton_transfer_data jetton_transfer_details, "
+      "nft_transfer_data nft_transfer_details, "
+      "jetton_swap_data jetton_swap_details, "
+      "change_dns_record_data change_dns_record_details, "
+      "success boolean default true, "
+      "primary key (trace_id, action_id),"
+      "foreign key (trace_id) references traces"
+      ");\n"
+    );
 
     // some necessary indexes
     query += (
       "create index if not exists traces_index_1 on traces (state);\n"
       "create index if not exists trace_edges_index_1 on trace_edges (msg_hash);\n"
       "create index if not exists trace_edges_index_2 on trace_edges (incomplete);\n"
+      "create index if not exists trace_unclassified_index on traces (start_lt) include (trace_id, state) where (classification_state = 'unclassified');\n"
     );
 
     LOG(DEBUG) << query;
