@@ -1915,10 +1915,10 @@ void InsertManagerPostgres::start_up() {
       "end_lt bigint, "
       "end_utime integer, "
       "state trace_state, "
-      "classification_state trace_classification_state default 'unclassified', "
       "pending_edges_ bigint, "
       "edges_ bigint, "
       "nodes_ bigint, "
+      "classification_state trace_classification_state default 'unclassified', "
       "primary key (trace_id)"
       ");\n"
     );
