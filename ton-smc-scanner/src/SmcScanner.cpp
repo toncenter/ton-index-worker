@@ -66,7 +66,6 @@ void ShardStateScanner::schedule_next() {
         auto shard_account_csr = accounts_dict.vm::DictionaryFixed::lookup_nearest_key(cur_addr_.bits(), 256, true, allow_same);
         if (shard_account_csr.is_null()) {
             finished = true;
-            LOG(ERROR) << "Finished!";
             break;
         }
         allow_same = false;
@@ -84,8 +83,13 @@ void ShardStateScanner::schedule_next() {
     }
     processed_ += count;
 
-    td::actor::send_closure(options_.insert_manager_, &PostgreSQLInsertManager::checkpoint, cur_addr_);
-    alarm_timestamp() = td::Timestamp::in(1.0);
+    if(!finished) {
+        td::actor::send_closure(options_.insert_manager_, &PostgreSQLInsertManager::checkpoint, cur_addr_);
+        alarm_timestamp() = td::Timestamp::in(1.0);
+    } else {
+        LOG(ERROR) << "Finished!";
+        stop();
+    }
 }
 
 void ShardStateScanner::start_up() {
