@@ -112,7 +112,7 @@ void PostgreSQLInserter::insert_latest_account_states(pqxx::work &transaction) {
         << "code_hash = EXCLUDED.code_hash, "
         << "data_boc = EXCLUDED.data_boc, "
         << "code_boc = EXCLUDED.code_boc "
-        << "WHERE latest_account_states.last_trans_lt < EXCLUDED.last_trans_lt;\n";
+        << "WHERE latest_account_states.last_trans_lt <= EXCLUDED.last_trans_lt;\n";
   transaction.exec0(query.str());
   return;
 }
