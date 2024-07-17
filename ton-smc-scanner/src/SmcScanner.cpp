@@ -2,6 +2,28 @@
 #include "convert-utils.h"
 
 void SmcScanner::start_up() {
+    if (options_.from_checkpoint) {
+        auto P = td::PromiseCreator::lambda([=, SelfId = actor_id(this)](td::Result<td::Bits256> R) {
+            td::Bits256 cur_addr{td::Bits256::zero()};
+            if (R.is_error()) {
+                LOG(ERROR) << "Failed to restore checkpoint: " << R.move_as_error();
+                return;
+            } else {
+                cur_addr = R.move_as_ok();
+            }
+            td::actor::send_closure(SelfId, &SmcScanner::got_checkpoint, std::move(cur_addr));
+        });
+
+        td::actor::send_closure(options_.insert_manager_, &PostgreSQLInsertManager::checkpoint_read, std::move(P));
+    } else {
+        td::actor::send_closure(actor_id(this), &SmcScanner::got_checkpoint, td::Bits256::zero());
+    }
+}
+
+void SmcScanner::got_checkpoint(td::Bits256 cur_addr) {
+    LOG(INFO) << "Restored checkpoint address: " << cur_addr;
+    options_.cur_addr = cur_addr;
+
     auto P = td::PromiseCreator::lambda([=, SelfId = actor_id(this)](td::Result<MasterchainBlockDataState> R){
         if (R.is_error()) {
             LOG(ERROR) << "Failed to get seqno " << options_.seqno_ << ": " << R.move_as_error();
@@ -60,6 +82,8 @@ void ShardStateScanner::schedule_next() {
         }
     }
     processed_ += count;
+
+    td::actor::send_closure(options_.insert_manager_, &PostgreSQLInsertManager::checkpoint, cur_addr_);
     alarm_timestamp() = td::Timestamp::in(0.1);
 }
 

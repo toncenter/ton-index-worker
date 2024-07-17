@@ -35,6 +35,8 @@ public:
   void alarm() override;
   void insert_data(std::vector<InsertData> data);
   void insert_done();
+  void checkpoint(td::Bits256 cur_addr_);
+  void checkpoint_read(td::Promise<td::Bits256> promise);
 private:
   void check_queue(bool force = false);
 

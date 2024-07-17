@@ -245,6 +245,44 @@ void PostgreSQLInsertManager::insert_done() {
   --in_progress_;
 }
 
+void PostgreSQLInsertManager::checkpoint(td::Bits256 cur_addr_) {
+  try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) { return; }
+      pqxx::work txn(c);    
+      td::StringBuilder sb;
+      sb << "create table if not exists _ton_smc_scanner(cur_addr varchar);\n";
+
+      sb << "insert into _ton_smc_scanner(cur_addr) values (" 
+         << txn.quote(td::base64_encode(cur_addr_.as_slice())) 
+         << ") on conflict do update set cur_addr = excluded.cur_addr;\n";
+      txn.exec0(sb.as_cslice().str());
+      txn.commit();
+  } catch (const std::exception &e) {
+      LOG(ERROR) << "Error inserting to PG: " +std::string(e.what());
+  }
+}
+
+void PostgreSQLInsertManager::checkpoint_read(td::Promise<td::Bits256> promise) {
+  try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) { return; }
+      pqxx::work txn(c);    
+      
+      auto row = txn.exec1("select cur_addr from _ton_smc_scanner;");
+      auto R = td::base64_decode(row[0].as<std::string>());
+      txn.commit();
+      if (R.is_error()) {
+        LOG(ERROR) << "Failed to decode b64 string: " << row[0].as<std::string>();
+        std::_Exit(2);
+      }
+      auto cur_addr = td::Bits256(td::ConstBitPtr(td::Slice(R.move_as_ok()).ubegin()));
+      promise.set_value(std::move(cur_addr));
+  } catch (const std::exception &e) {
+      promise.set_error(td::Status::Error("Error reading checkpoint from PG: " + std::string(e.what())));
+  }
+}
+
 void PostgreSQLInsertManager::insert_data(std::vector<InsertData> data) {
   for(auto &&row : data) {
     queue_.push_back(std::move(row));

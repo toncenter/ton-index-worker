@@ -21,6 +21,9 @@ struct Options {
   td::actor::ActorId<PostgreSQLInsertManager> insert_manager_;
   std::int32_t batch_size_{100};
   bool index_interfaces_{false};
+  bool from_checkpoint{true};
+
+  td::Bits256 cur_addr{td::Bits256::zero()};
 };
 
 class ShardStateScanner;
@@ -52,7 +55,7 @@ private:
   Options options_;
   std::vector<std::pair<td::Bits256, td::Ref<vm::CellSlice>>> queue_;
 
-  td::Bits256 cur_addr_ = td::Bits256::zero();
+  td::Bits256 cur_addr_{td::Bits256::zero()};
 
   bool allow_same{true};
   bool finished{false};
@@ -80,5 +83,6 @@ public:
     db_scanner_(db_scanner), options_(options) {};
 
   void start_up() override;
+  void got_checkpoint(td::Bits256 cur_addr);
   void got_block(MasterchainBlockDataState block);
 };
