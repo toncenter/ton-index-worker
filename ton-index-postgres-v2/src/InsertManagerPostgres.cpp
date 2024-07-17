@@ -1051,7 +1051,7 @@ std::string InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
     std::string code_str = "NULL";
     std::string data_str = "NULL";
 
-    if (max_data_depth_ >= 0 && account_state.data.not_null() && (account_state.data->get_depth() <= max_data_depth_)){
+    if (max_data_depth_ >= 0 && account_state.data.not_null() && (max_data_depth_ == 0 || account_state.data->get_depth() <= max_data_depth_)){
       auto data_res = vm::std_boc_serialize(account_state.data);
       if (data_res.is_ok()){
         data_str = txn.quote(td::base64_encode(data_res.move_as_ok().as_slice().str()));
