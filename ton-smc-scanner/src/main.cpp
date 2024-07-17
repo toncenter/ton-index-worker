@@ -69,13 +69,8 @@ int main(int argc, char *argv[]) {
   p.add_option('i', "interfaces", "Detect interfaces", [&] {
     options_.index_interfaces_ = true;
   });
-  p.add_option('f', "from-addr", "Start from address", [&](td::Slice value) {
-    auto R = td::base64_decode(value);
-    if (R.is_error()) {
-      LOG(ERROR) << "Failed to decode b64 string in parameter from-addr: " << value;
-      std::_Exit(2);
-    }
-    options_.cur_addr = td::Bits256(td::ConstBitPtr(td::Slice(R.move_as_ok()).ubegin()));
+  p.add_option('f', "force", "Reset checkpoints", [&]() {
+    options_.from_checkpoint = false;
   });
 
   auto S = p.run(argc, argv);

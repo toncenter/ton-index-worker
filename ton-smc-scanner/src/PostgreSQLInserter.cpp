@@ -245,17 +245,17 @@ void PostgreSQLInsertManager::insert_done() {
   --in_progress_;
 }
 
-void PostgreSQLInsertManager::checkpoint(td::Bits256 cur_addr_) {
+void PostgreSQLInsertManager::checkpoint(ton::ShardIdFull shard, td::Bits256 cur_addr_) {
   try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) { return; }
       pqxx::work txn(c);    
       td::StringBuilder sb;
-      sb << "create table if not exists _ton_smc_scanner(id int primary key, cur_addr varchar);\n";
-
-      sb << "insert into _ton_smc_scanner(id, cur_addr) values (1, " 
-         << txn.quote(td::base64_encode(cur_addr_.as_slice())) 
-         << ") on conflict(id) do update set cur_addr = excluded.cur_addr;\n";
+      sb << "create table if not exists _ton_smc_scanner(id int, workchain bigint, shard bigint, cur_addr varchar, primary key (id, workchain, shard));\n";
+      sb << "insert into _ton_smc_scanner(id, workchain, shard, cur_addr) values (1, " 
+         << shard.workchain << "," << static_cast<std::int64_t>(shard.shard) << ","
+         << txn.quote(cur_addr_.to_binary()) 
+         << ") on conflict(id, workchain, shard) do update set cur_addr = excluded.cur_addr;\n";
       txn.exec0(sb.as_cslice().str());
       txn.commit();
   } catch (const std::exception &e) {
@@ -263,23 +263,36 @@ void PostgreSQLInsertManager::checkpoint(td::Bits256 cur_addr_) {
   }
 }
 
-void PostgreSQLInsertManager::checkpoint_read(td::Promise<td::Bits256> promise) {
+void PostgreSQLInsertManager::checkpoint_read(ton::ShardIdFull shard, td::Promise<td::Bits256> promise) {
   try {
       pqxx::connection c(connection_string_);
       if (!c.is_open()) { return; }
       pqxx::work txn(c);    
       
-      auto row = txn.exec1("select cur_addr from _ton_smc_scanner where id = 1;");
-      auto R = td::base64_decode(row[0].as<std::string>());
-      txn.commit();
-      if (R.is_error()) {
-        LOG(ERROR) << "Failed to decode b64 string: " << row[0].as<std::string>();
-        std::_Exit(2);
-      }
-      auto cur_addr = td::Bits256(td::ConstBitPtr(td::Slice(R.move_as_ok()).ubegin()));
+      td::StringBuilder sb;
+      sb << "select cur_addr from _ton_smc_scanner where id = 1 and workchain = "
+         << shard.workchain << " and shard = " << static_cast<std::int64_t>(shard.shard) << ";";
+      auto row = txn.exec1(sb.as_cslice().str());
+      td::Bits256 cur_addr;
+      cur_addr.from_binary(row[0].as<std::string>());
       promise.set_value(std::move(cur_addr));
   } catch (const std::exception &e) {
       promise.set_error(td::Status::Error("Error reading checkpoint from PG: " + std::string(e.what())));
+  }
+}
+
+void PostgreSQLInsertManager::checkpoint_reset(ton::ShardIdFull shard) {
+  try {
+      pqxx::connection c(connection_string_);
+      if (!c.is_open()) { return; }
+      pqxx::work txn(c);    
+      
+      td::StringBuilder sb;
+      sb << "create table if not exists _ton_smc_scanner(id int, workchain bigint, shard bigint, cur_addr varchar, primary key (id, workchain, shard));\n";
+      sb << "delete from _ton_smc_scanner where id = 1 and workchain = " << shard.workchain << " and shard = " << static_cast<std::int64_t>(shard.shard) << ";\n";
+      txn.exec0(sb.as_cslice().str());
+  } catch (const std::exception &e) {
+      LOG(ERROR) << "Error reseting checkpoint from PG: " + std::string(e.what());
   }
 }
 
