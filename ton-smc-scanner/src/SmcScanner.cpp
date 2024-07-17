@@ -7,7 +7,6 @@ void SmcScanner::start_up() {
             td::Bits256 cur_addr{td::Bits256::zero()};
             if (R.is_error()) {
                 LOG(ERROR) << "Failed to restore checkpoint: " << R.move_as_error();
-                return;
             } else {
                 cur_addr = R.move_as_ok();
             }
