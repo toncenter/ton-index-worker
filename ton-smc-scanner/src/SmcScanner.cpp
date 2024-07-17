@@ -84,7 +84,7 @@ void ShardStateScanner::schedule_next() {
     processed_ += count;
 
     if(!finished) {
-        td::actor::send_closure(options_.insert_manager_, &PostgreSQLInsertManager::checkpoint, cur_addr_);
+        // td::actor::send_closure(options_.insert_manager_, &PostgreSQLInsertManager::checkpoint, cur_addr_);
         alarm_timestamp() = td::Timestamp::in(1.0);
     } else {
         LOG(ERROR) << "Finished!";
