@@ -251,11 +251,11 @@ void PostgreSQLInsertManager::checkpoint(td::Bits256 cur_addr_) {
       if (!c.is_open()) { return; }
       pqxx::work txn(c);    
       td::StringBuilder sb;
-      sb << "create table if not exists _ton_smc_scanner(cur_addr varchar);\n";
+      sb << "create table if not exists _ton_smc_scanner(id int primary key, cur_addr varchar);\n";
 
-      sb << "insert into _ton_smc_scanner(cur_addr) values (" 
+      sb << "insert into _ton_smc_scanner(id, cur_addr) values (1, " 
          << txn.quote(td::base64_encode(cur_addr_.as_slice())) 
-         << ") on conflict do update set cur_addr = excluded.cur_addr;\n";
+         << ") on conflict(id) do update set cur_addr = excluded.cur_addr;\n";
       txn.exec0(sb.as_cslice().str());
       txn.commit();
   } catch (const std::exception &e) {
@@ -269,7 +269,7 @@ void PostgreSQLInsertManager::checkpoint_read(td::Promise<td::Bits256> promise) 
       if (!c.is_open()) { return; }
       pqxx::work txn(c);    
       
-      auto row = txn.exec1("select cur_addr from _ton_smc_scanner;");
+      auto row = txn.exec1("select cur_addr from _ton_smc_scanner where id = 1;");
       auto R = td::base64_decode(row[0].as<std::string>());
       txn.commit();
       if (R.is_error()) {

@@ -2,7 +2,9 @@
 #include "convert-utils.h"
 
 void SmcScanner::start_up() {
-    if (options_.from_checkpoint) {
+    if (!options_.cur_addr.is_zero()) {
+        td::actor::send_closure(actor_id(this), &SmcScanner::got_checkpoint, options_.cur_addr);
+    } else if (options_.from_checkpoint) {
         auto P = td::PromiseCreator::lambda([=, SelfId = actor_id(this)](td::Result<td::Bits256> R) {
             td::Bits256 cur_addr{td::Bits256::zero()};
             if (R.is_error()) {
@@ -83,12 +85,14 @@ void ShardStateScanner::schedule_next() {
     processed_ += count;
 
     td::actor::send_closure(options_.insert_manager_, &PostgreSQLInsertManager::checkpoint, cur_addr_);
-    alarm_timestamp() = td::Timestamp::in(0.1);
+    alarm_timestamp() = td::Timestamp::in(1.0);
 }
 
 void ShardStateScanner::start_up() {
     // cur_addr_.from_hex("012508807D259B1F3BDD2A830CF7F4591838E0A1D1474A476B20CFB540CD465B");
     // cur_addr_.from_hex("E750CF93EAEDD2EC01B5DE8F49A334622BD630A8728806ABA65F1443EB7C8FD7");
+
+    cur_addr_ = options_.cur_addr;
     shard_state_data_ = std::make_shared<ShardStateData>();
     for (const auto &shard_ds : mc_block_ds_.shard_blocks_) {
         shard_state_data_->shard_states_.push_back(shard_ds.block_state);
@@ -105,6 +109,7 @@ void ShardStateScanner::start_up() {
 }
 
 void ShardStateScanner::alarm() {
+    LOG(INFO) << "cur_addr: " << td::base64_encode(cur_addr_.as_slice());
     schedule_next();
 }
 

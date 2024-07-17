@@ -21,7 +21,7 @@ struct Options {
   td::actor::ActorId<PostgreSQLInsertManager> insert_manager_;
   std::int32_t batch_size_{100};
   bool index_interfaces_{false};
-  bool from_checkpoint{true};
+  bool from_checkpoint{false};
 
   td::Bits256 cur_addr{td::Bits256::zero()};
 };
