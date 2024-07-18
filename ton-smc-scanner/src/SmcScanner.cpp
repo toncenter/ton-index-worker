@@ -33,18 +33,24 @@ void ShardStateScanner::schedule_next() {
     int count = 0;
     allow_same = true;
     while (!finished && count < 10000) {
-        auto shard_account_csr = accounts_dict.vm::DictionaryFixed::lookup_nearest_key(cur_addr_.bits(), 256, true, allow_same);
+        td::Ref<vm::CellSlice> shard_account_csr = accounts_dict.vm::DictionaryFixed::lookup_nearest_key(cur_addr_.bits(), 256, true, allow_same);
         if (shard_account_csr.is_null()) {
             finished = true;
             break;
         }
         allow_same = false;
+        shard_account_csr = accounts_dict.extract_value(shard_account_csr);
+        block::gen::ShardAccount::Record acc_info;
+        if(!tlb::csr_unpack(shard_account_csr, acc_info)) {
+            LOG(ERROR) << "Failed to unpack ShardAccount for " << cur_addr_.to_hex();
+            continue;
+        }
 
         ++count;
-        queue_.push_back(std::make_pair(cur_addr_, std::move(shard_account_csr)));
+        queue_.push_back(std::make_pair(cur_addr_, std::move(acc_info)));
         if (queue_.size() > options_.batch_size_) {
             // LOG(INFO) << "Dispatched batch of " << queue_.size() << " account states";
-            std::vector<std::pair<td::Bits256, td::Ref<vm::CellSlice>>> batch_;
+            std::vector<std::pair<td::Bits256, block::gen::ShardAccount::Record>> batch_;
             std::copy(queue_.begin(), queue_.end(), std::back_inserter(batch_));
             queue_.clear();
             
@@ -141,28 +147,25 @@ void StateBatchParser::start_up() {
     //     continue;
     // }
     std::vector<schema::AccountState> state_list_;
-    for (auto &&[addr_, shard_account_csr] : data_) {
-        block::gen::ShardAccount::Record acc_info;
-        if(tlb::csr_unpack(std::move(shard_account_csr), acc_info)) {
-            int account_tag = block::gen::t_Account.get_tag(vm::load_cell_slice(acc_info.account));
-            switch (account_tag) {
-                case block::gen::Account::account_none: {
-                    LOG(WARNING) << "Skipping non-existing account " << addr_;
-                    break;
-                }
-                case block::gen::Account::account: {
-                    auto account_r = ParseQuery::parse_account(acc_info.account, shard_state_data_->sstate_.gen_utime, acc_info.last_trans_hash, acc_info.last_trans_lt);
-                    if (account_r.is_error()) {
-                        LOG(ERROR) << "Failed to parse account " << addr_.to_hex() << ": " << account_r.move_as_error();
-                        break;
-                    }
-                    auto account_state_ = account_r.move_as_ok();
-                    result_.push_back(account_state_);
-                    state_list_.push_back(account_state_);
-                    break;
-                }
-                default: LOG(ERROR) << "Unknown account tag"; break;
+    for (auto &[addr_, acc_info] : data_) {
+        int account_tag = block::gen::t_Account.get_tag(vm::load_cell_slice(acc_info.account));
+        switch (account_tag) {
+            case block::gen::Account::account_none: {
+                LOG(WARNING) << "Skipping non-existing account " << addr_;
+                break;
             }
+            case block::gen::Account::account: {
+                auto account_r = ParseQuery::parse_account(acc_info.account, shard_state_data_->sstate_.gen_utime, acc_info.last_trans_hash, acc_info.last_trans_lt);
+                if (account_r.is_error()) {
+                    LOG(ERROR) << "Failed to parse account " << addr_.to_hex() << ": " << account_r.move_as_error();
+                    break;
+                }
+                auto account_state_ = account_r.move_as_ok();
+                result_.push_back(account_state_);
+                state_list_.push_back(account_state_);
+                break;
+            }
+            default: LOG(ERROR) << "Unknown account tag"; break;
         }
     }
     if (options_.index_interfaces_) {

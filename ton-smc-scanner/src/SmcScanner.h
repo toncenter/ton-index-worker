@@ -19,7 +19,7 @@ using ShardStateDataPtr = std::shared_ptr<ShardStateData>;
 struct Options {
   std::uint32_t seqno_;
   td::actor::ActorId<PostgreSQLInsertManager> insert_manager_;
-  std::int32_t batch_size_{100};
+  std::int32_t batch_size_{5000};
   bool index_interfaces_{false};
   bool from_checkpoint{true};
 };
@@ -28,14 +28,14 @@ class ShardStateScanner;
 
 class StateBatchParser: public td::actor::Actor {
 private:
-  std::vector<std::pair<td::Bits256, td::Ref<vm::CellSlice>>> data_;
+  std::vector<std::pair<td::Bits256, block::gen::ShardAccount::Record>> data_;
   ShardStateDataPtr shard_state_data_;
   td::actor::ActorId<ShardStateScanner> shard_state_scanner_;
   Options options_;
   
   std::vector<InsertData> result_;
 public:
-  StateBatchParser(std::vector<std::pair<td::Bits256, td::Ref<vm::CellSlice>>> data, ShardStateDataPtr shard_state_data, td::actor::ActorId<ShardStateScanner> shard_state_scanner, Options options)
+  StateBatchParser(std::vector<std::pair<td::Bits256, block::gen::ShardAccount::Record>> data, ShardStateDataPtr shard_state_data, td::actor::ActorId<ShardStateScanner> shard_state_scanner, Options options)
     : data_(std::move(data)), shard_state_data_(std::move(shard_state_data)), shard_state_scanner_(shard_state_scanner), options_(options) {}
   void start_up() override;
   void processing_finished();
@@ -51,7 +51,7 @@ private:
 
   ShardStateDataPtr shard_state_data_;
   Options options_;
-  std::vector<std::pair<td::Bits256, td::Ref<vm::CellSlice>>> queue_;
+  std::vector<std::pair<td::Bits256, block::gen::ShardAccount::Record>> queue_;
 
   td::Bits256 cur_addr_{td::Bits256::zero()};
   

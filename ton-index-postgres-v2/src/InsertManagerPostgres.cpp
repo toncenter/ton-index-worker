@@ -1037,7 +1037,7 @@ std::string InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
 
   std::ostringstream query;
   query << "INSERT INTO latest_account_states (account, account_friendly, hash, balance, "
-                                              "account_status, timestamp, last_trans_lt, "
+                                              "account_status, timestamp, last_trans_hash, last_trans_lt, "
                                               "frozen_hash, data_hash, code_hash, "
                                               "data_boc, code_boc) VALUES ";
   bool is_first = true;
@@ -1078,6 +1078,7 @@ std::string InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
           << account_state.balance << ","
           << txn.quote(account_state.account_status) << ","
           << account_state.timestamp << ","
+          << txn.quote(td::base64_encode(account_state.last_trans_hash.as_slice())) << ","
           << to_int64(account_state.last_trans_lt) << ","
           << TO_SQL_OPTIONAL_STRING(account_state.frozen_hash, txn) << ","
           << TO_SQL_OPTIONAL_STRING(account_state.data_hash, txn) << ","
@@ -1094,6 +1095,7 @@ std::string InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
         << "balance = EXCLUDED.balance, "
         << "account_status = EXCLUDED.account_status, "
         << "timestamp = EXCLUDED.timestamp, "
+        << "last_trans_hash = EXCLUDED.last_trans_hash, "
         << "last_trans_lt = EXCLUDED.last_trans_lt, "
         << "frozen_hash = EXCLUDED.frozen_hash, "
         << "data_hash = EXCLUDED.data_hash, "
@@ -1783,6 +1785,7 @@ void InsertManagerPostgres::start_up() {
       "balance bigint, "
       "account_status account_status_type, "
       "timestamp integer, "
+      "last_trans_hash char(44), "
       "last_trans_lt bigint, "
       "frozen_hash char(44), "
       "data_hash char(44), "
