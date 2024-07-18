@@ -1779,6 +1779,7 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists latest_account_states ("
+      "id serial not null, "
       "account varchar not null primary key, "
       "account_friendly varchar, "
       "hash char(44) not null, "
@@ -1796,6 +1797,7 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists nft_collections ("
+      "id serial not null, "
       "address varchar not null primary key, "
       "next_item_index numeric, "
       "owner_address varchar, "
@@ -1809,6 +1811,7 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists nft_items ("
+      "id serial not null, "
       "address varchar not null primary key, "
       "init boolean, "
       "index numeric, "
@@ -1843,6 +1846,7 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists jetton_masters ("
+      "id serial not null, "
       "address varchar not null primary key, "
       "total_supply numeric, "
       "mintable boolean, "
@@ -1858,6 +1862,7 @@ void InsertManagerPostgres::start_up() {
 
     query += (
       "create table if not exists jetton_wallets ("
+      "id serial not null, "
       "address varchar not null primary key, "
       "balance numeric, "
       "owner varchar, "
