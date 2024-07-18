@@ -254,7 +254,7 @@ void PostgreSQLInsertManager::checkpoint(ton::ShardIdFull shard, td::Bits256 cur
       sb << "create table if not exists _ton_smc_scanner(id int, workchain bigint, shard bigint, cur_addr varchar, primary key (id, workchain, shard));\n";
       sb << "insert into _ton_smc_scanner(id, workchain, shard, cur_addr) values (1, " 
          << shard.workchain << "," << static_cast<std::int64_t>(shard.shard) << ","
-         << txn.quote(cur_addr_.to_binary()) 
+         << txn.quote(cur_addr_.to_hex()) 
          << ") on conflict(id, workchain, shard) do update set cur_addr = excluded.cur_addr;\n";
       txn.exec0(sb.as_cslice().str());
       txn.commit();
@@ -274,7 +274,7 @@ void PostgreSQLInsertManager::checkpoint_read(ton::ShardIdFull shard, td::Promis
          << shard.workchain << " and shard = " << static_cast<std::int64_t>(shard.shard) << ";";
       auto row = txn.exec1(sb.as_cslice().str());
       td::Bits256 cur_addr;
-      cur_addr.from_binary(row[0].as<std::string>());
+      cur_addr.from_hex(row[0].as<std::string>());
       promise.set_value(std::move(cur_addr));
   } catch (const std::exception &e) {
       promise.set_error(td::Status::Error("Error reading checkpoint from PG: " + std::string(e.what())));

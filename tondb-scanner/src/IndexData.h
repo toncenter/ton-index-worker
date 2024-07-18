@@ -289,8 +289,8 @@ struct AccountState {
   td::optional<std::string> code_hash;
   td::Ref<vm::Cell> data;
   td::optional<std::string> data_hash;
+  td::Bits256 last_trans_hash;
   uint64_t last_trans_lt;     // in "nonexist" case it is lt of block, not tx. TODO: fix it
-  uint32_t last_trans_now;
 };
 
 //

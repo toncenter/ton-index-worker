@@ -104,7 +104,7 @@ void ShardStateScanner::start_up() {
 }
 
 void ShardStateScanner::alarm() {
-    LOG(INFO) << "workchain: " << shard_.workchain << " shard: " << static_cast<std::int64_t>(shard_.shard) << " cur_addr: " << cur_addr_.to_binary();
+    LOG(INFO) << "workchain: " << shard_.workchain << " shard: " << static_cast<std::int64_t>(shard_.shard) << " cur_addr: " << cur_addr_.to_hex();
     schedule_next();
 }
 
@@ -141,23 +141,28 @@ void StateBatchParser::start_up() {
     //     continue;
     // }
     std::vector<schema::AccountState> state_list_;
-    for (auto &[addr_, shard_account_csr] : data_) {
-        td::Ref<vm::Cell> account_root = shard_account_csr->prefetch_ref();
-        int account_tag = block::gen::t_Account.get_tag(vm::load_cell_slice(account_root));
-        switch (account_tag) {
-            case block::gen::Account::account_none: break;
-            case block::gen::Account::account: {
-                auto account_r = ParseQuery::parse_account(account_root, shard_state_data_->sstate_.gen_utime);
-                if (account_r.is_error()) {
-                    LOG(ERROR) << "Failed to parse account " << addr_.to_hex() << ": " << account_r.move_as_error();
+    for (auto &&[addr_, shard_account_csr] : data_) {
+        block::gen::ShardAccount::Record acc_info;
+        if(tlb::csr_unpack(std::move(shard_account_csr), acc_info)) {
+            int account_tag = block::gen::t_Account.get_tag(vm::load_cell_slice(acc_info.account));
+            switch (account_tag) {
+                case block::gen::Account::account_none: {
+                    LOG(WARNING) << "Skipping non-existing account " << addr_;
                     break;
                 }
-                auto account_state_ = account_r.move_as_ok();
-                result_.push_back(account_state_);
-                state_list_.push_back(account_state_);
-                break;
+                case block::gen::Account::account: {
+                    auto account_r = ParseQuery::parse_account(acc_info.account, shard_state_data_->sstate_.gen_utime, acc_info.last_trans_hash, acc_info.last_trans_lt);
+                    if (account_r.is_error()) {
+                        LOG(ERROR) << "Failed to parse account " << addr_.to_hex() << ": " << account_r.move_as_error();
+                        break;
+                    }
+                    auto account_state_ = account_r.move_as_ok();
+                    result_.push_back(account_state_);
+                    state_list_.push_back(account_state_);
+                    break;
+                }
+                default: LOG(ERROR) << "Unknown account tag"; break;
             }
-            default: LOG(ERROR) << "Unknown account tag"; break;
         }
     }
     if (options_.index_interfaces_) {
