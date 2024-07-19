@@ -104,16 +104,15 @@ void InsertBatchPostgres::start_up() {
     pqxx::work txn(c);
 
     // prepare queries
-    std::string insert_query;
     std::string insert_under_mutex_query;
-    insert_query += insert_blocks(txn);
-    insert_query += insert_shard_state(txn);
-    insert_query += insert_transactions(txn);
-    insert_query += insert_messages(txn);
-    insert_query += insert_account_states(txn);
-    insert_query += insert_jetton_transfers(txn);
-    insert_query += insert_jetton_burns(txn);
-    insert_query += insert_nft_transfers(txn);
+    insert_blocks(txn);
+    insert_shard_state(txn);
+    insert_transactions(txn);
+    insert_messages(txn);
+    insert_account_states(txn);
+    insert_jetton_transfers(txn);
+    insert_jetton_burns(txn);
+    insert_nft_transfers(txn);
     insert_under_mutex_query += insert_jetton_masters(txn);
     insert_under_mutex_query += insert_jetton_wallets(txn);
     insert_under_mutex_query += insert_nft_collections(txn);
@@ -122,7 +121,6 @@ void InsertBatchPostgres::start_up() {
     insert_under_mutex_query += insert_traces(txn);
 
     // execute queries
-    txn.exec0(insert_query);
     {
       std::lock_guard<std::mutex> guard(latest_account_states_update_mutex);
       txn.exec0(insert_under_mutex_query);
@@ -507,10 +505,11 @@ std::string InsertBatchPostgres::insert_blocks(pqxx::work &txn) {
     return "";
   }
   query << " ON CONFLICT DO NOTHING;\n";
+  txn.exec0(query.str());
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
   // LOG(INFO) << "Blocks query size: " << double(query.str().length()) / 1024 / 1024;
-  return query.str();
+  return "";
 }
 
 
@@ -538,9 +537,10 @@ std::string InsertBatchPostgres::insert_shard_state(pqxx::work &txn) {
     return "";
   }
   query << " ON CONFLICT DO NOTHING;\n";
+  txn.exec0(query.str());
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
-  return query.str();
+  return "";
 }
 
 template<typename T>
@@ -868,14 +868,13 @@ std::string InsertBatchPostgres::insert_transactions(pqxx::work &txn) {
     return "";
   }
   query << " ON CONFLICT DO NOTHING;\n";
+  txn.exec0(query.str());
   // LOG(INFO) << "Transactions query size: " << double(query.str().length()) / 1024 / 1024;
-  return query.str();
+  return "";
 }
 
 
 std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
-  std::string full_query;
-
   std::vector<std::tuple<td::Bits256, std::string>> msg_bodies;
   {
     std::ostringstream query;
@@ -946,7 +945,7 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
     }
     query << " ON CONFLICT DO NOTHING;\n";
     // LOG(INFO) << "Messages query size: " << double(query.str().length()) / 1024 / 1024;
-    full_query = query.str();
+    txn.exec0(query.str());
   }
 
   // insert message contents
@@ -968,7 +967,7 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
     }
     if (!is_first) {
       query << " ON CONFLICT DO NOTHING;\n";
-      full_query += query.str();
+      txn.exec0(query.str());
     } else {
       LOG(WARNING) << "No message bodies in batch!";
     }
@@ -982,7 +981,7 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
     }
   }
 
-  return full_query;
+  return "";
 }
 
 std::string InsertBatchPostgres::insert_account_states(pqxx::work &txn) {
@@ -1017,7 +1016,9 @@ std::string InsertBatchPostgres::insert_account_states(pqxx::work &txn) {
   query << " ON CONFLICT DO NOTHING;\n";
   // LOG(DEBUG) << "Running SQL query: " << query.str();
   // LOG(INFO) << "Account states query size: " << double(query.str().length()) / 1024 / 1024;
-  return query.str();
+  txn.exec0(query.str());
+
+  return "";
 }
 
 std::string InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
@@ -1362,7 +1363,8 @@ std::string InsertBatchPostgres::insert_jetton_transfers(pqxx::work &txn) {
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
   // LOG(INFO) << "Jetton transfers query size: " << double(query.str().length()) / 1024 / 1024;
-  return query.str();
+  txn.exec0(query.str());
+  return "";
 }
 
 std::string InsertBatchPostgres::insert_jetton_burns(pqxx::work &txn) {
@@ -1403,7 +1405,8 @@ std::string InsertBatchPostgres::insert_jetton_burns(pqxx::work &txn) {
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
   // LOG(INFO) << "Jetton burns query size: " << double(query.str().length()) / 1024 / 1024;
-  return query.str();
+  txn.exec0(query.str());
+  return "";
 }
 
 std::string InsertBatchPostgres::insert_nft_transfers(pqxx::work &txn) {
@@ -1449,7 +1452,9 @@ std::string InsertBatchPostgres::insert_nft_transfers(pqxx::work &txn) {
 
   // LOG(DEBUG) << "Running SQL query: " << query.str();
   // LOG(INFO) << "NFT transfers query size: " << double(query.str().length()) / 1024 / 1024;
-  return query.str();
+  txn.exec0(query.str());
+
+  return "";
 }
 
 #define B64HASH(x) (td::base64_encode((x).as_slice()))
