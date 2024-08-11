@@ -395,6 +395,7 @@ void NftCollectionDetectorR::start_up() {
       stop();
       return;
     }
+    data.owner_address = owner_address.move_as_ok();
   }
   auto collection_content = parse_token_data(stack[1].as_cell());
   if (collection_content.is_error()) {
