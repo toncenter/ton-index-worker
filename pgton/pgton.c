@@ -28,7 +28,11 @@ PG_FUNCTION_INFO_V1(tonhash_cmp);
 Datum tonhash_in(PG_FUNCTION_ARGS) {
     char *str = PG_GETARG_CSTRING(0);
     TonHash *result = (TonHash*) palloc(sizeof(TonHash));
-    if (strlen(str) != 44) {
+    int len = strlen(str);
+    if (len == 0) {
+        PG_RETURN_NULL();
+    }
+    if (len != 44) {
         pfree(result);
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
             errmsg("invalid length of input for type %s: \"%ld\" != 44", "tonhash", strlen(str))));
@@ -140,6 +144,9 @@ Datum tonaddr_in(PG_FUNCTION_ARGS) {
     TonAddr *result = (TonAddr*) palloc(sizeof(TonAddr));
 
     int pos, len = strlen(str);
+    if (len == 0) {
+        PG_RETURN_NULL();
+    }
     if (strncmp(str, "addr_none", 9) == 0) {
         result->workchain = 123456;
         PG_RETURN_POINTER(result);
@@ -148,6 +155,7 @@ Datum tonaddr_in(PG_FUNCTION_ARGS) {
         result->workchain = 123457;
         PG_RETURN_POINTER(result);
     }
+    
     if (sscanf(str, "%d:%n", &result->workchain, &pos) != 1) {
         pfree(result);
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
