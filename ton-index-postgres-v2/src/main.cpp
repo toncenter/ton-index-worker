@@ -277,11 +277,11 @@ int main(int argc, char *argv[]) {
   }
 
   if (max_batch_size) {
-    batch_size.mc_blocks_ = max_queue_size;
-    batch_size.blocks_ = max_queue_size;
-    batch_size.txs_ = max_queue_size;
-    batch_size.msgs_ = max_queue_size;
-    batch_size.traces_ = max_queue_size;
+    batch_size.mc_blocks_ = max_batch_size;
+    batch_size.blocks_ = max_batch_size;
+    batch_size.txs_ = max_batch_size;
+    batch_size.msgs_ = max_batch_size;
+    batch_size.traces_ = max_batch_size;
   }
 
   auto watcher = td::create_shared_destructor([] {
