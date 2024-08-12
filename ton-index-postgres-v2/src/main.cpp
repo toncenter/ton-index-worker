@@ -34,6 +34,7 @@ int main(int argc, char *argv[]) {
   td::uint32 from_seqno = 0;
   td::uint32 to_seqno = 0;
   bool force_index = false;
+  bool custom_types = false;
   InsertManagerPostgres::Credential credential;
 
   std::uint32_t max_active_tasks = 7;
@@ -81,6 +82,11 @@ int main(int argc, char *argv[]) {
   p.add_option('d', "dbname", "PostgreSQL database name", [&](td::Slice value) { 
     credential.dbname = value.str();
   });
+  p.add_option('\0', "custom-types", "Use pgton extension with custom types", [&]() {
+    custom_types= true;
+    LOG(WARNING) << "Using pgton extension!";
+  });
+
   p.add_checked_option('f', "from", "Masterchain seqno to start indexing from", [&](td::Slice value) { 
     int v;
     try {
@@ -283,7 +289,7 @@ int main(int argc, char *argv[]) {
   });
 
   td::actor::Scheduler scheduler({td::actor::Scheduler::NodeInfo{threads, io_workers}});
-  scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential); });
+  scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential, custom_types); });
   scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
   scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary); });
 
