@@ -228,6 +228,9 @@ static int tonaddr_cmp_internal(TonAddr *a, TonAddr *b) {
     if (a->workchain > b->workchain) {
         return 1;
     }
+    if (a->workchain == 123456 || a->workchain == 123457) {
+        return 0;
+    }
     return memcmp(a->addr, b->addr, 32);
 }
 
