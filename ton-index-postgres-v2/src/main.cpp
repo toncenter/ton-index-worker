@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
     std::_Exit(2);
   }
 
-  if (max_queue_size) {
+  if (max_queue_size > 0) {
     max_queue.mc_blocks_ = max_queue_size;
     max_queue.blocks_ = max_queue_size;
     max_queue.txs_ = max_queue_size;
@@ -276,7 +276,7 @@ int main(int argc, char *argv[]) {
     max_queue.traces_ = max_queue_size;
   }
 
-  if (max_batch_size) {
+  if (max_batch_size > 0) {
     batch_size.mc_blocks_ = max_batch_size;
     batch_size.blocks_ = max_batch_size;
     batch_size.txs_ = max_batch_size;
