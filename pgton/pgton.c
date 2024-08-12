@@ -140,6 +140,14 @@ Datum tonaddr_in(PG_FUNCTION_ARGS) {
     TonAddr *result = (TonAddr*) palloc(sizeof(TonAddr));
 
     int pos, len = strlen(str);
+    if (strncmp(str, "addr_none", 9) == 0) {
+        result->workchain = 123456;
+        PG_RETURN_POINTER(result);
+    }
+    if (strncmp(str, "addr_extern", 11) == 0) {
+        result->workchain = 123457;
+        PG_RETURN_POINTER(result);
+    }
     if (sscanf(str, "%d:%n", &result->workchain, &pos) != 1) {
         pfree(result);
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
@@ -161,6 +169,15 @@ Datum tonaddr_in(PG_FUNCTION_ARGS) {
 
 Datum tonaddr_out(PG_FUNCTION_ARGS) {
     TonAddr *addr = (TonAddr*) PG_GETARG_POINTER(0);
+
+    if (addr->workchain == 123456) {
+        char *result = psprintf("addr_none");
+        PG_RETURN_CSTRING(result);
+    }
+    if (addr->workchain == 123457) {
+        char *result = psprintf("addr_extern");
+        PG_RETURN_CSTRING(result);
+    }
 
     char workchain[20];
     memset(workchain, '\0', 20);
