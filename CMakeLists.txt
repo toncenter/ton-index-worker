@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(ton-index-cpp)
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 add_subdirectory(external/ton EXCLUDE_FROM_ALL)
 add_subdirectory(external/libpqxx EXCLUDE_FROM_ALL)
 add_subdirectory(external/clickhouse-cpp EXCLUDE_FROM_ALL)
@@ -22,3 +23,4 @@ add_subdirectory(ton-integrity-checker)
 add_subdirectory(ton-smc-scanner)
 add_subdirectory(ton-trace-emulator)
 add_subdirectory(sandbox-cpp)
+add_subdirectory(pgton)
