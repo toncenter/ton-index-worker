@@ -1756,8 +1756,8 @@ void InsertManagerPostgres::start_up() {
         if (custom_types_) {
           query += "create extension if not exists pgton;\n";
         } else {
-          query += "create type tonhash as char(44);\n";
-          query += "create type tonaddr as varchar;\n";
+          query += "create domain tonhash as char(44);\n";
+          query += "create domain tonaddr as varchar;\n";
         }
 
         query += (
