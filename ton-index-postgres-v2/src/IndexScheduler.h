@@ -27,7 +27,7 @@ private:
   std::shared_ptr<td::Destructor> watcher_;
 
   std::uint32_t max_active_tasks_{32};
-  std::int32_t last_known_seqno_{0};
+  std::int32_t last_known_seqno_{-1};
   std::int32_t last_indexed_seqno_{0};
   std::int32_t from_seqno_{0};
   std::int32_t to_seqno_{0};
