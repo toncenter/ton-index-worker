@@ -114,6 +114,19 @@ void JettonWalletDetectorR::start_up() {
     return;
   }
   data.jetton = jetton.move_as_ok();
+  if (std::find(mintless_jettons.begin(), mintless_jettons.end(), convert::to_raw_address(data.jetton)) != mintless_jettons.end()) {
+    auto is_claimed_stack_r = execute_smc_method<4>(address_, code_cell_, data_cell_, config_, "is_claimed", {},
+      {vm::StackEntry::Type::t_int});
+    if (is_claimed_stack_r.is_error()) {
+      promise_.set_error(is_claimed_stack_r.move_as_error());
+      stop();
+      return;
+    }
+    auto is_claimed_stack = is_claimed_stack_r.move_as_ok();
+    data.mintless_is_claimed = is_claimed_stack[0].as_int()->to_long() != 0;
+  } else {
+    data.mintless_is_claimed = std::nullopt;
+  }
 
   auto R = td::PromiseCreator::lambda([=, SelfId = actor_id(this)](td::Result<schema::AccountState> account_state_r) mutable {
     if (account_state_r.is_error()) {
