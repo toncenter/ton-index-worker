@@ -24,10 +24,6 @@ public:
 
   void start_up() override;
 
-  const std::vector<std::string> mintless_jettons = {
-    "0:FA67D0C7739331FBC3C8F08E018C65F47763616A969100AD760A0B2DC1E36832"
-  };
-
 private:
   void verify_with_master(td::Ref<vm::Cell> master_code, td::Ref<vm::Cell> master_data, Result jetton_wallet_data);
 
