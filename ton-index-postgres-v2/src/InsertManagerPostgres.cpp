@@ -2370,6 +2370,7 @@ void InsertManagerPostgres::start_up() {
     
     // some necessary indexes
     query += (
+      "alter table jetton_wallets add column if not exists mintless_is_claimed numeric;\n"
       "alter table jetton_wallets add column if not exists mintless_amount numeric;\n"
       "alter table jetton_wallets add column if not exists mintless_start_from bigint;\n"
       "alter table jetton_wallets add column if not exists mintless_expire_at bigint;\n"
