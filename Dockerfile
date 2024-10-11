@@ -9,7 +9,7 @@ RUN apt update -y \
 # building
 COPY external/ /app/external/
 COPY pgton/ /app/pgton/
-COPY sandbox-cpp/ /app/sandbox-cpp/
+COPY pipeline-poc/ /app/pipeline-poc/
 COPY ton-index-clickhouse/ /app/ton-index-clickhouse/
 COPY ton-index-postgres/ /app/ton-index-postgres/
 COPY ton-index-postgres-v2/ /app/ton-index-postgres-v2/

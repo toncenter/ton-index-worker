@@ -37,6 +37,7 @@ add_subdirectory(ton-index-clickhouse)
 add_subdirectory(ton-integrity-checker)
 add_subdirectory(ton-smc-scanner)
 add_subdirectory(ton-trace-emulator)
+add_subdirectory(pipeline-poc)
 add_subdirectory(sandbox-cpp)
 
 if (PGTON)
