@@ -17,5 +17,5 @@ public:
     void get_first_block();
 
     void get_block(ton::BlockSeqno mc_seqno);
-    void got_block_handle(ton::validator::ConstBlockHandle handle);
+    void got_block(bool result);
 };
