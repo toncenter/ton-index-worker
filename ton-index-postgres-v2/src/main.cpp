@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
   bool force_index = false;
   bool custom_types = false;
   bool create_indexes = false;
+  bool datalake_mode = false;
   InsertManagerPostgres::Credential credential;
 
   std::uint32_t max_active_tasks = 7;
@@ -95,6 +96,11 @@ int main(int argc, char *argv[]) {
   p.add_option('\0', "create-indexes", "Create indexes in database", [&]() {
     create_indexes = true;
     LOG(WARNING) << "Indexes will be created on launch. It may take several hours!";
+  });
+
+  p.add_option('\0', "datalake-mode", "Use database schema for datalake export", [&]() {
+    datalake_mode = true;
+    LOG(WARNING) << "Using datalake mode for DB";
   });
 
   p.add_checked_option('f', "from", "Masterchain seqno to start indexing from", [&](td::Slice value) { 
@@ -303,7 +309,7 @@ int main(int argc, char *argv[]) {
   });
 
   td::actor::Scheduler scheduler({td::actor::Scheduler::NodeInfo{threads, io_workers}});
-  scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential, custom_types, create_indexes); });
+  scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential, custom_types, create_indexes, datalake_mode); });
   scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
   scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary, working_dir); });
 

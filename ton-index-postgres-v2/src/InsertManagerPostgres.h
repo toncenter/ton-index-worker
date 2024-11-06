@@ -21,11 +21,12 @@ private:
   InsertManagerPostgres::Credential credential_;
   bool custom_types_{false};
   bool create_indexes_{false};
+  bool datalake_mode_{false};
   std::int32_t max_data_depth_{0};
   std::int32_t out_of_sync_seqno_{0};
 public:
-  InsertManagerPostgres(InsertManagerPostgres::Credential credential, bool custom_types, bool create_indexes) : 
-    credential_(credential), custom_types_(custom_types), create_indexes_(create_indexes) {}
+  InsertManagerPostgres(InsertManagerPostgres::Credential credential, bool custom_types, bool create_indexes, bool datalake_mode) : 
+    credential_(credential), custom_types_(custom_types), create_indexes_(create_indexes), datalake_mode_(datalake_mode) {}
 
   void start_up() override;
 
@@ -39,8 +40,8 @@ public:
 
 class InsertBatchPostgres: public td::actor::Actor {
 public:
-  InsertBatchPostgres(InsertManagerPostgres::Credential credential, std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise, std::int32_t max_data_depth = 12) :
-    credential_(std::move(credential)), insert_tasks_(std::move(insert_tasks)), promise_(std::move(promise)), max_data_depth_(max_data_depth) {
+  InsertBatchPostgres(InsertManagerPostgres::Credential credential, std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise, std::int32_t max_data_depth = 12, bool datalake_mode = false) :
+    credential_(std::move(credential)), insert_tasks_(std::move(insert_tasks)), promise_(std::move(promise)), max_data_depth_(max_data_depth), datalake_mode_(datalake_mode) {
       // sorting in descending seqno order for easier processing of interfaces
       std::sort(insert_tasks_.begin(), insert_tasks_.end(), [](const auto& a, const auto& b) {
         return a.mc_seqno_ > b.mc_seqno_;
@@ -56,6 +57,7 @@ private:
   td::Promise<td::Unit> promise_;
   std::int32_t max_data_depth_;
   std::int32_t retry_count_{0};
+  bool datalake_mode_;
 
   std::string stringify(schema::ComputeSkipReason compute_skip_reason);
   std::string stringify(schema::AccStatusChange acc_status_change);

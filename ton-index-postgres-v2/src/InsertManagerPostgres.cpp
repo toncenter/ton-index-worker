@@ -99,7 +99,10 @@ void InsertBatchPostgres::alarm() {
     insert_shard_state(txn);
     insert_transactions(txn);
     insert_messages(txn);
-    insert_account_states(txn);
+    // Ignore accounts states in datalake mode, we will use full state from blockchain from latest_account states
+    if (!datalake_mode_) {
+      insert_account_states(txn);
+    }
     insert_jetton_transfers(txn);
     insert_jetton_burns(txn);
     insert_nft_transfers(txn);
@@ -555,7 +558,8 @@ std::string InsertBatchPostgres::insert_transactions(pqxx::work &txn) {
   query << "INSERT INTO transactions (account, hash, lt, block_workchain, block_shard, block_seqno, "
                                      "mc_block_seqno, trace_id, prev_trans_hash, prev_trans_lt, now, "
                                      "orig_status, end_status, total_fees, account_state_hash_before, "
-                                     "account_state_hash_after, descr, aborted, destroyed, "
+                                     "account_state_hash_after" << (datalake_mode_ ? ", account_state_code_hash_before, account_state_code_hash_after, account_state_balance_before, account_state_balance_after" : "") << 
+                                     ", descr, aborted, destroyed, "
                                      "credit_first, is_tock, installed, storage_fees_collected, "
                                      "storage_fees_due, storage_status_change, credit_due_fees_collected, "
                                      "credit, compute_skipped, skipped_reason, compute_success, "
@@ -696,6 +700,16 @@ std::string InsertBatchPostgres::insert_transactions(pqxx::work &txn) {
 
   bool is_first = true;
   for (const auto& task : insert_tasks_) {
+    // cache account states for datalake mode, maps account hash to account code hash and balance
+    std::map<td::Bits256, std::pair<std::optional<td::Bits256>, uint64_t>> account_states_set;
+    if (datalake_mode_) {
+      for (const auto& account_state : task.parsed_block_->account_states_) {
+        if (account_state.account_status == "nonexist") {
+          continue;
+        }
+        account_states_set[account_state.hash] = std::make_pair(account_state.code_hash, account_state.balance);
+      }
+    }
     for (const auto &blk : task.parsed_block_->blocks_) {
       for (const auto& transaction : blk.transactions) {
         if (is_first) {
@@ -720,6 +734,16 @@ std::string InsertBatchPostgres::insert_transactions(pqxx::work &txn) {
               << transaction.total_fees << ","
               << txn.quote(td::base64_encode(transaction.account_state_hash_before.as_slice())) << ","
               << txn.quote(td::base64_encode(transaction.account_state_hash_after.as_slice())) << ",";
+        if (datalake_mode_) {
+          auto state_before = account_states_set.find(transaction.account_state_hash_before);
+          auto state_after = account_states_set.find(transaction.account_state_hash_after);
+
+
+          query << ((state_before != account_states_set.end() && state_before->second.first) ? txn.quote(td::base64_encode(state_before->second.first.value().as_slice())) : "NULL") << ",";
+          query << ((state_after != account_states_set.end() && state_after->second.first) ? txn.quote(td::base64_encode(state_after->second.first.value().as_slice())) : "NULL") << ",";
+          query << (state_before != account_states_set.end() ? std::to_string(state_before->second.second) : "NULL") << ",";
+          query << (state_after != account_states_set.end() ? std::to_string(state_after->second.second) : "NULL") << ",";
+        }
         // insert description
         if (auto* v = std::get_if<schema::TransactionDescr_ord>(&transaction.description)) {
           query << "'ord',"
@@ -869,10 +893,11 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
   std::vector<std::tuple<td::Bits256, std::string>> msg_bodies;
   {
     std::ostringstream query;
-    query << "INSERT INTO messages (tx_hash, tx_lt, msg_hash, direction, trace_id, source, "
+    // for datalake mode we need to store tx_now to get explicit partitioning key
+    query << "INSERT INTO messages (tx_hash, tx_lt, " << (datalake_mode_ ? "tx_now, " : "") << "msg_hash, direction, trace_id, source, "
                                   "destination, value, fwd_fee, ihr_fee, created_lt, "
                                   "created_at, opcode, ihr_disabled, bounce, bounced, "
-                                  "import_fee, body_hash, init_state_hash) VALUES ";
+                                  "import_fee, body_hash, init_state_hash" << (datalake_mode_ ? ", body_boc, init_state_boc" : "") << ") VALUES ";
     bool is_first = true;
     auto store_message = [&](const schema::Transaction& tx, const schema::Message& msg, std::string direction) {
       if (is_first) {
@@ -883,6 +908,7 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
       query << "("
             << txn.quote(td::base64_encode(tx.hash.as_slice())) << ","
             << tx.lt << ","
+            << (datalake_mode_ ? (std::to_string(tx.now) + ",") : "")
             << txn.quote(td::base64_encode(msg.hash.as_slice())) << ","
             << txn.quote(direction) << ","
             << txn.quote(td::base64_encode(msg.trace_id.as_slice())) << ","
@@ -900,9 +926,10 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
             << to_int64(msg.import_fee) << ","
             << txn.quote(td::base64_encode(msg.body->get_hash().as_slice())) << ","
             << (msg.init_state.not_null() ? txn.quote(td::base64_encode(msg.init_state->get_hash().as_slice())) : "NULL")
+            << (datalake_mode_ ? ("," + txn.quote(msg.body_boc) + "," + (msg.init_state_boc ? txn.quote(msg.init_state_boc.value()) : "NULL")) : "")
             << ")";
       // collect unique message contents
-      {
+      if (!datalake_mode_) {
         std::lock_guard<std::mutex> guard(messages_in_progress_mutex);
         td::Bits256 body_hash = msg.body->get_hash().bits();
         if (msg_bodies_in_progress.find(body_hash) == msg_bodies_in_progress.end()) {
@@ -940,7 +967,7 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
   }
 
   // insert message contents
-  {
+  if (!datalake_mode_) {
     // LOG(INFO) << "Insert " << msg_bodies.size() << " msg bodies. In progress: " << msg_bodies_in_progress.size();
     std::ostringstream query;
     query << "INSERT INTO message_contents (hash, body) VALUES ";
@@ -965,7 +992,7 @@ std::string InsertBatchPostgres::insert_messages(pqxx::work &txn) {
   }
 
   // unlock messages
-  {
+  if (!datalake_mode_) {
     std::lock_guard<std::mutex> guard(messages_in_progress_mutex);
     for (const auto& [body_hash, body] : msg_bodies) {
       msg_bodies_in_progress.erase(body_hash);
@@ -1140,7 +1167,8 @@ std::string InsertBatchPostgres::insert_jetton_masters(pqxx::work &txn) {
   }
 
   std::ostringstream query;
-  query << "INSERT INTO jetton_masters (address, total_supply, mintable, admin_address, jetton_content, jetton_wallet_code_hash, last_transaction_lt, code_hash, data_hash) VALUES ";
+  query << "INSERT INTO jetton_masters (address, total_supply, mintable, admin_address, jetton_content, jetton_wallet_code_hash, last_transaction_lt" << 
+      (datalake_mode_ ? ", last_tx_now" : "") << ", code_hash, data_hash) VALUES ";
   bool is_first = true;
   for (const auto& [addr, jetton_master] : jetton_masters) {
     if (is_first) {
@@ -1160,6 +1188,7 @@ std::string InsertBatchPostgres::insert_jetton_masters(pqxx::work &txn) {
           << (jetton_master.jetton_content ? txn.quote(content_to_json_string(jetton_master.jetton_content.value())) : "NULL") << ","
           << txn.quote(td::base64_encode(jetton_master.jetton_wallet_code_hash.as_slice())) << ","
           << jetton_master.last_transaction_lt << ","
+          << (datalake_mode_ ? (std::to_string(jetton_master.last_transaction_now) + ",") : "")
           << txn.quote(td::base64_encode(jetton_master.code_hash.as_slice())) << ","
           << txn.quote(td::base64_encode(jetton_master.data_hash.as_slice()))
           << ")";
@@ -1174,6 +1203,7 @@ std::string InsertBatchPostgres::insert_jetton_masters(pqxx::work &txn) {
         << "jetton_content = EXCLUDED.jetton_content, "
         << "jetton_wallet_code_hash = EXCLUDED.jetton_wallet_code_hash, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+        << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
         << "data_hash = EXCLUDED.data_hash WHERE jetton_masters.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
   return query.str();
@@ -1197,7 +1227,8 @@ std::string InsertBatchPostgres::insert_jetton_wallets(pqxx::work &txn) {
   std::unordered_set<block::StdAddress, AddressHasher> known_mintless_masters;
 
   std::ostringstream query;
-  query << "INSERT INTO jetton_wallets (balance, address, owner, jetton, last_transaction_lt, code_hash, data_hash, mintless_is_claimed) VALUES ";
+  query << "INSERT INTO jetton_wallets (balance, address, owner, jetton, last_transaction_lt" << 
+    (datalake_mode_ ? ", last_tx_now" : "") << ", code_hash, data_hash, mintless_is_claimed) VALUES ";
   bool is_first = true;
   for (const auto& [addr, jetton_wallet] : jetton_wallets) {
     if (is_first) {
@@ -1211,6 +1242,7 @@ std::string InsertBatchPostgres::insert_jetton_wallets(pqxx::work &txn) {
           << txn.quote(convert::to_raw_address(jetton_wallet.owner)) << ","
           << txn.quote(convert::to_raw_address(jetton_wallet.jetton)) << ","
           << jetton_wallet.last_transaction_lt << ","
+          << (datalake_mode_ ? (std::to_string(jetton_wallet.last_transaction_now) + ",") : "")
           << txn.quote(td::base64_encode(jetton_wallet.code_hash.as_slice())) << ","
           << txn.quote(td::base64_encode(jetton_wallet.data_hash.as_slice())) << ","
           << TO_SQL_OPTIONAL_BOOL(jetton_wallet.mintless_is_claimed)
@@ -1227,6 +1259,7 @@ std::string InsertBatchPostgres::insert_jetton_wallets(pqxx::work &txn) {
         << "owner = EXCLUDED.owner, "
         << "jetton = EXCLUDED.jetton, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+        << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
         << "data_hash = EXCLUDED.data_hash, "
         << "mintless_is_claimed = EXCLUDED.mintless_is_claimed WHERE jetton_wallets.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
@@ -1264,7 +1297,8 @@ std::string InsertBatchPostgres::insert_nft_collections(pqxx::work &txn) {
   }
 
   std::ostringstream query;
-  query << "INSERT INTO nft_collections (address, next_item_index, owner_address, collection_content, last_transaction_lt, code_hash, data_hash) VALUES ";
+  query << "INSERT INTO nft_collections (address, next_item_index, owner_address, collection_content, last_transaction_lt" << 
+    (datalake_mode_ ? ", last_tx_now" : "") << ", code_hash, data_hash) VALUES ";
   bool is_first = true;
   for (const auto& [addr, nft_collection] : nft_collections) {
     if (is_first) {
@@ -1282,6 +1316,7 @@ std::string InsertBatchPostgres::insert_nft_collections(pqxx::work &txn) {
           << TO_SQL_OPTIONAL_STRING(raw_owner_address, txn) << ","
           << (nft_collection.collection_content ? txn.quote(content_to_json_string(nft_collection.collection_content.value())) : "NULL") << ","
           << nft_collection.last_transaction_lt << ","
+          << (datalake_mode_ ? (std::to_string(nft_collection.last_transaction_now) + ",") : "")
           << txn.quote(td::base64_encode(nft_collection.code_hash.as_slice())) << ","
           << txn.quote(td::base64_encode(nft_collection.data_hash.as_slice()))
           << ")";
@@ -1294,6 +1329,7 @@ std::string InsertBatchPostgres::insert_nft_collections(pqxx::work &txn) {
         << "owner_address = EXCLUDED.owner_address, "
         << "collection_content = EXCLUDED.collection_content, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+        << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
         << "data_hash = EXCLUDED.data_hash WHERE nft_collections.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
   return query.str();
@@ -1315,7 +1351,8 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
   }
 
   std::ostringstream query;
-  query << "INSERT INTO nft_items (address, init, index, collection_address, owner_address, content, last_transaction_lt, code_hash, data_hash) VALUES ";
+  query << "INSERT INTO nft_items (address, init, index, collection_address, owner_address, content, last_transaction_lt" << 
+    (datalake_mode_ ? ", last_tx_now" : "") << ", code_hash, data_hash) VALUES ";
   bool is_first = true;
   for (const auto& [addr, nft_item] : nft_items) {
     if (is_first) {
@@ -1339,6 +1376,7 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
           << TO_SQL_OPTIONAL_STRING(raw_owner_address, txn) << ","
           << (nft_item.content ? txn.quote(content_to_json_string(nft_item.content.value())) : "NULL") << ","
           << nft_item.last_transaction_lt << ","
+          << (datalake_mode_ ? (std::to_string(nft_item.last_transaction_now) + ",") : "")
           << txn.quote(td::base64_encode(nft_item.code_hash.as_slice())) << ","
           << txn.quote(td::base64_encode(nft_item.data_hash.as_slice()))
           << ")";
@@ -1353,6 +1391,7 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
         << "owner_address = EXCLUDED.owner_address, "
         << "content = EXCLUDED.content, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+        
         << "code_hash = EXCLUDED.code_hash, "
         << "data_hash = EXCLUDED.data_hash WHERE nft_items.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
   return query.str();
@@ -1374,7 +1413,8 @@ std::string InsertBatchPostgres::insert_getgems_nft_sales(pqxx::work &txn) {
   }
 
   std::ostringstream query;
-  query << "INSERT INTO getgems_nft_sales (address, is_complete, created_at, marketplace_address, nft_address, nft_owner_address, full_price, marketplace_fee_address, marketplace_fee, royalty_address, royalty_amount, last_transaction_lt, code_hash, data_hash) VALUES ";
+  query << "INSERT INTO getgems_nft_sales (address, is_complete, created_at, marketplace_address, nft_address, nft_owner_address, full_price, marketplace_fee_address, marketplace_fee, royalty_address, royalty_amount, last_transaction_lt" << 
+    (datalake_mode_ ? ", last_tx_now" : "") << ", code_hash, data_hash) VALUES ";
   bool is_first = true;
   for (const auto& [addr, nft_sale] : nft_sales) {
     if (is_first) {
@@ -1399,6 +1439,7 @@ std::string InsertBatchPostgres::insert_getgems_nft_sales(pqxx::work &txn) {
           << txn.quote(convert::to_raw_address(nft_sale.royalty_address)) << ","
           << (nft_sale.royalty_amount.not_null() ? nft_sale.royalty_amount->to_dec_string() : "NULL") << ","
           << nft_sale.last_transaction_lt << ","
+          << (datalake_mode_ ? (std::to_string(nft_sale.last_transaction_now) + ",") : "")
           << txn.quote(td::base64_encode(nft_sale.code_hash.as_slice())) << ","
           << txn.quote(td::base64_encode(nft_sale.data_hash.as_slice()))
           << ")";
@@ -1418,6 +1459,7 @@ std::string InsertBatchPostgres::insert_getgems_nft_sales(pqxx::work &txn) {
         << "royalty_address = EXCLUDED.royalty_address, "
         << "royalty_amount = EXCLUDED.royalty_amount, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+        << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
         << "data_hash = EXCLUDED.data_hash WHERE getgems_nft_sales.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
   return query.str();
@@ -1439,7 +1481,8 @@ std::string InsertBatchPostgres::insert_getgems_nft_auctions(pqxx::work &txn) {
   }
 
   std::ostringstream query;
-  query << "INSERT INTO getgems_nft_auctions (address, end_flag, end_time, mp_addr, nft_addr, nft_owner, last_bid, last_member, min_step, mp_fee_addr, mp_fee_factor, mp_fee_base, royalty_fee_addr, royalty_fee_factor, royalty_fee_base, max_bid, min_bid, created_at, last_bid_at, is_canceled, last_transaction_lt, code_hash, data_hash) VALUES ";
+  query << "INSERT INTO getgems_nft_auctions (address, end_flag, end_time, mp_addr, nft_addr, nft_owner, last_bid, last_member, min_step, mp_fee_addr, mp_fee_factor, mp_fee_base, royalty_fee_addr, royalty_fee_factor, royalty_fee_base, max_bid, min_bid, created_at, last_bid_at, is_canceled, last_transaction_lt" << 
+    (datalake_mode_ ? ", last_tx_now" : "") << ", code_hash, data_hash) VALUES ";
   bool is_first = true;
   for (const auto& [addr, nft_auction] : nft_auctions) {
     if (is_first) {
@@ -1477,6 +1520,7 @@ std::string InsertBatchPostgres::insert_getgems_nft_auctions(pqxx::work &txn) {
           << nft_auction.last_bid_at << ","
           << TO_SQL_BOOL(nft_auction.is_canceled) << ","
           << nft_auction.last_transaction_lt << ","
+          << (datalake_mode_ ? (std::to_string(nft_auction.last_transaction_now) + ",") : "")
           << txn.quote(td::base64_encode(nft_auction.code_hash.as_slice())) << ","
           << txn.quote(td::base64_encode(nft_auction.data_hash.as_slice()))
           << ")";
@@ -1505,6 +1549,7 @@ std::string InsertBatchPostgres::insert_getgems_nft_auctions(pqxx::work &txn) {
         << "last_bid_at = EXCLUDED.last_bid_at, "
         << "is_canceled = EXCLUDED.is_canceled, "
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
+        << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
         << "data_hash = EXCLUDED.data_hash WHERE getgems_nft_auctions.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
   return query.str();
@@ -1898,6 +1943,11 @@ void InsertManagerPostgres::start_up() {
       "total_fees bigint, "
       "account_state_hash_before tonhash, "
       "account_state_hash_after tonhash, "
+      );
+    if (datalake_mode_) {
+      query += ("account_state_code_hash_before tonhash, account_state_code_hash_after tonhash, account_state_balance_before bigint, account_state_balance_after bigint, ");
+    }
+    query += (
       "descr descr_type, "
       "aborted boolean, "
       "destroyed boolean, "
@@ -1957,7 +2007,11 @@ void InsertManagerPostgres::start_up() {
       "create table if not exists messages ("
       "tx_hash tonhash, "
       "tx_lt bigint, "
-      "msg_hash tonhash, "
+    );
+    if (datalake_mode_) {
+      query += "tx_now integer, ";
+    }
+    query += ("msg_hash tonhash, "
       "direction msg_direction, "
       "trace_id tonhash, "
       "source tonaddr, "
@@ -1974,27 +2028,33 @@ void InsertManagerPostgres::start_up() {
       "import_fee bigint, "
       "body_hash tonhash, "
       "init_state_hash tonhash, "
-      "primary key (tx_hash, tx_lt, msg_hash, direction), "
+    );
+    if (datalake_mode_) {
+      query += "body_boc text, init_state_boc text, ";
+    }
+    query += ("primary key (tx_hash, tx_lt, msg_hash, direction), "
       "foreign key (tx_hash, tx_lt) references transactions);\n"
     );
 
-    query += (
-      "create table if not exists message_contents ("
-      "hash tonhash not null primary key, "
-      "body text);"
-    );
+    if (!datalake_mode_) {
+      query += (
+        "create table if not exists message_contents ("
+        "hash tonhash not null primary key, "
+        "body text);"
+      );
 
-    query += (
-      "create table if not exists account_states ("
-      "hash tonhash not null primary key, "
-      "account tonaddr, "
-      "balance bigint, "
-      "account_status account_status_type, "
-      "frozen_hash tonhash, "
-      "data_hash tonhash, "
-      "code_hash tonhash"
-      ");\n"
-    );
+      query += (
+        "create table if not exists account_states ("
+        "hash tonhash not null primary key, "
+        "account tonaddr, "
+        "balance bigint, "
+        "account_status account_status_type, "
+        "frozen_hash tonhash, "
+        "data_hash tonhash, "
+        "code_hash tonhash"
+        ");\n"
+      );
+    }
 
     query += (
       "create table if not exists latest_account_states ("
@@ -2022,7 +2082,11 @@ void InsertManagerPostgres::start_up() {
       "owner_address tonaddr, "
       "collection_content jsonb, "
       "last_transaction_lt bigint, "
-      "code_hash tonhash, "
+    );
+    if (datalake_mode_) {
+      query += "last_tx_now integer, ";
+    }
+    query += ("code_hash tonhash, "
       "data_hash tonhash);\n"
     );
 
@@ -2036,7 +2100,11 @@ void InsertManagerPostgres::start_up() {
       "owner_address tonaddr, "
       "content jsonb, "
       "last_transaction_lt bigint, "
-      "code_hash tonhash, "
+    );
+    if (datalake_mode_) {
+      query += "last_tx_now integer, ";
+    }
+    query += ("code_hash tonhash, "
       "data_hash tonhash);\n"
     );
 
@@ -2071,7 +2139,11 @@ void InsertManagerPostgres::start_up() {
       "jetton_content jsonb, "
       "jetton_wallet_code_hash tonhash, "
       "last_transaction_lt bigint, "
-      "code_hash tonhash, "
+    );
+    if (datalake_mode_) {
+      query += "last_tx_now integer, ";
+    }
+    query += ("code_hash tonhash, "
       "data_hash tonhash);\n"
     );
 
@@ -2083,7 +2155,11 @@ void InsertManagerPostgres::start_up() {
       "owner tonaddr, "
       "jetton tonaddr, "
       "last_transaction_lt bigint, "
-      "code_hash tonhash, "
+    );
+    if (datalake_mode_) {
+      query += "last_tx_now integer, ";
+    }
+    query += ("code_hash tonhash, "
       "data_hash tonhash, "
       "mintless_is_claimed boolean, "
       "mintless_amount numeric, "
@@ -2145,7 +2221,11 @@ void InsertManagerPostgres::start_up() {
       "royalty_address tonaddr, "
       "royalty_amount numeric, "
       "last_transaction_lt bigint, "
-      "code_hash tonhash, "
+    );
+    if (datalake_mode_) {
+      query += "last_tx_now integer, ";
+    }
+    query += ("code_hash tonhash, "
       "data_hash tonhash);\n"
     );
 
@@ -2173,7 +2253,11 @@ void InsertManagerPostgres::start_up() {
       "last_bid_at bigint, "
       "is_canceled boolean, "
       "last_transaction_lt bigint, "
-      "code_hash tonhash, "
+    );
+    if (datalake_mode_) {
+      query += "last_tx_now integer, ";
+    }
+    query += ("code_hash tonhash, "
       "data_hash tonhash);\n"
     );
 
@@ -2499,7 +2583,7 @@ void InsertManagerPostgres::get_trace_assembler_state(td::Promise<schema::TraceA
 }
 
 void InsertManagerPostgres::create_insert_actor(std::vector<InsertTaskStruct> insert_tasks, td::Promise<td::Unit> promise) {
-  td::actor::create_actor<InsertBatchPostgres>("insert_batch_postgres", credential_, std::move(insert_tasks), std::move(promise), max_data_depth_).release();
+  td::actor::create_actor<InsertBatchPostgres>("insert_batch_postgres", credential_, std::move(insert_tasks), std::move(promise), max_data_depth_, datalake_mode_).release();
 }
 
 void InsertManagerPostgres::get_existing_seqnos(td::Promise<std::vector<std::uint32_t>> promise, std::int32_t from_seqno, std::int32_t to_seqno) {
