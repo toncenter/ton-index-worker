@@ -1240,7 +1240,6 @@ std::string InsertBatchPostgres::insert_jetton_wallets(pqxx::work &txn) {
       } else {
         query << ", ";
       }
-      LOG(INFO) << "Indexed mintless jetton: " << convert::to_raw_address(addr);
       query << "(" << txn.quote(convert::to_raw_address(addr)) << ", FALSE)";
     }
     query << " ON CONFLICT (address) DO NOTHING;\n";

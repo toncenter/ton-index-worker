@@ -3,6 +3,7 @@
 #include "td/utils/format.h"
 #include "td/utils/logging.h"
 #include "td/utils/check.h"
+#include "td/utils/port/path.h"
 
 #include "crypto/vm/cp0.h"
 
@@ -45,7 +46,7 @@ int main(int argc, char *argv[]) {
   
   std::int32_t max_queue_size{-1};
   std::int32_t max_batch_size{-1};
-  QueueState max_queue{100000, 100000, 100000, 100000};
+  QueueState max_queue{10000, 100000, 100000, 100000};
   QueueState batch_size{2000, 2000, 10000, 10000};
   
   td::OptionParser p;
@@ -278,9 +279,10 @@ int main(int argc, char *argv[]) {
     std::_Exit(2);
   }
   if (working_dir.size() == 0) {
-    working_dir = PSTRING() << "/tmp/index_worker_" << getpid();
-    LOG(WARNING) << "Working dir not specified, using " << working_dir;
+    LOG(ERROR) << "Please specify working directory with -W or --working-dir";
+    std::_Exit(2);
   }
+  td::mkdir(working_dir).ensure();
 
   if (max_queue_size > 0) {
     max_queue.mc_blocks_ = max_queue_size;
@@ -305,10 +307,10 @@ int main(int argc, char *argv[]) {
   td::actor::Scheduler scheduler({td::actor::Scheduler::NodeInfo{threads, io_workers}});
   scheduler.run_in_context([&] { insert_manager_ = td::actor::create_actor<InsertManagerPostgres>("insertmanager", credential, custom_types, create_indexes); });
   scheduler.run_in_context([&] { parse_manager_ = td::actor::create_actor<ParseManager>("parsemanager"); });
-  scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary, working_dir); });
+  scheduler.run_in_context([&] { db_scanner_ = td::actor::create_actor<DbScanner>("scanner", db_root, dbs_secondary, working_dir + "/secondary_logs"); });
 
   scheduler.run_in_context([&, watcher = std::move(watcher)] { index_scheduler_ = td::actor::create_actor<IndexScheduler>("indexscheduler", db_scanner_.get(), 
-    insert_manager_.get(), parse_manager_.get(), from_seqno, to_seqno, force_index, max_active_tasks, max_queue, stats_timeout, watcher); 
+    insert_manager_.get(), parse_manager_.get(), working_dir, from_seqno, to_seqno, force_index, max_active_tasks, max_queue, stats_timeout, watcher); 
   });
   scheduler.run_in_context([&] { 
     td::actor::send_closure(insert_manager_, &InsertManagerPostgres::set_parallel_inserts_actors, max_insert_actors);

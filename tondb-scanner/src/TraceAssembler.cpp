@@ -2,40 +2,13 @@
 #include <functional>
 
 #include "TraceAssembler.h"
+#include "td/utils/JsonBuilder.h"
 #include "convert-utils.h"
+#include "tddb/td/db/RocksDb.h"
 
 //
 // Utils
 //
-#define B64HASH(x) (td::base64_encode((x).as_slice()))
-
-template<class T>
-std::optional<T> to_std_optional(td::optional<T> item) {
-    return (item ? std::optional<T>(item.value()) : std::optional<T>());
-}
-
-//
-// Utils
-//
-std::string TraceEdgeImpl::str() const {
-    td::StringBuilder sb;
-    sb << "TraceEdge("
-       << trace_id << ", "
-       << msg_hash << ", " 
-       << (left_tx.has_value() ? B64HASH(left_tx.value()) : "null") << ", "
-       << (right_tx.has_value() ? B64HASH(right_tx.value()) : "null") << ")";
-    return sb.as_cslice().str();
-}
-
-std::string TraceImpl::str() const {
-    td::StringBuilder sb;
-    sb << "Trace(" << trace_id 
-       << ", nodes="  << nodes_ 
-       << ", edges=" << edges_ 
-       << ", pending_edges=" << pending_edges_ << ")";
-    return sb.as_cslice().str();
-}
-
 schema::TraceEdge TraceEdgeImpl::to_schema() const {
     schema::TraceEdge result;
     result.trace_id = trace_id;
@@ -59,7 +32,7 @@ TraceEdgeImpl TraceEdgeImpl::from_schema(const schema::TraceEdge& edge) {
     edge_impl.type = edge.type;
     edge_impl.incomplete = edge.incomplete;
     edge_impl.broken = edge.broken;
-    return std::move(edge_impl);
+    return edge_impl;
 }
 
 schema::Trace TraceImpl::to_schema() const {
@@ -73,9 +46,9 @@ schema::Trace TraceImpl::to_schema() const {
     result.end_lt = end_lt;
     result.end_utime = end_utime;
     result.state = state;
-    result.pending_edges_ = pending_edges_;
-    result.edges_ = edges_;
-    result.nodes_ = nodes_;
+    result.pending_edges_ = pending_edges;
+    result.edges_ = edges;
+    result.nodes_ = nodes;
     return result;
 }
 
@@ -90,55 +63,125 @@ TraceImplPtr TraceImpl::from_schema(const schema::Trace& trace) {
     trace_impl->end_lt = trace.end_lt;
     trace_impl->end_utime = trace.end_utime;
     trace_impl->state = trace.state;
-    trace_impl->pending_edges_ = trace.pending_edges_;
-    trace_impl->edges_ = trace.edges_;
-    trace_impl->nodes_ = trace.nodes_;
+    trace_impl->pending_edges = trace.pending_edges_;
+    trace_impl->edges = trace.edges_;
+    trace_impl->nodes = trace.nodes_;
     return std::move(trace_impl);
 }
 
 //
 // TraceAssembler
 //
+TraceAssembler::TraceAssembler(std::string db_path, size_t gc_distance) : 
+        db_path_(db_path), gc_distance_(gc_distance) {
+    auto kv = td::RocksDb::open(db_path);
+    if (kv.is_error()) {
+        LOG(FATAL) << "Failed to open RocksDB: " << kv.error();
+    }
+    kv_ = std::make_unique<td::RocksDb>(kv.move_as_ok());
+}
+
 void TraceAssembler::start_up() {
-    alarm_timestamp() = td::Timestamp::in(10.0);
+    alarm_timestamp() = td::Timestamp::in(60.0);
 }
 
 void TraceAssembler::alarm() {
-    alarm_timestamp() = td::Timestamp::in(10.0);
+    alarm_timestamp() = td::Timestamp::in(60.0);
 
     LOG(INFO) << " Pending traces: " << pending_traces_.size()
               << " Pending edges: " << pending_edges_.size()
               << " Broken traces: " << broken_count_;
 }
 
-void TraceAssembler::assemble(std::int32_t seqno, ParsedBlockPtr block, td::Promise<ParsedBlockPtr> promise) {
+void TraceAssembler::assemble(ton::BlockSeqno seqno, ParsedBlockPtr block, td::Promise<ParsedBlockPtr> promise) {
     queue_.emplace(seqno, Task{seqno, std::move(block), std::move(promise)});
 
-    if (is_ready_) {
-        process_queue();
-    }
-}
-
-void TraceAssembler::update_expected_seqno(std::int32_t new_expected_seqno) { 
-    expected_seqno_ = new_expected_seqno;
-    LOG(INFO) << "Updating the expected senqo. New expected seqno is " << expected_seqno_;
-    if (is_ready_) {
-        process_queue();
-    }
-}
-
-void TraceAssembler::restore_trace_assembler_state(schema::TraceAssemblerState state) {
-    LOG(INFO) << "Got TraceAssemblerState with " << state.pending_traces_.size() 
-              << " pending traces and " << state.pending_edges_.size() << " pending edges.";
-
-    for (auto &trace : state.pending_traces_) {
-        pending_traces_.emplace(trace.trace_id, TraceImpl::from_schema(trace));
-    }
-    for (auto &edge : state.pending_edges_) {
-        pending_edges_.emplace(edge.msg_hash, TraceEdgeImpl::from_schema(edge));
-    }
-    is_ready_ = true;
     process_queue();
+}
+
+void TraceAssembler::set_expected_seqno(ton::BlockSeqno new_expected_seqno) { 
+    expected_seqno_ = new_expected_seqno;
+}
+
+td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno) {
+    auto snapshot = kv_->snapshot();
+    bool found = false;
+    auto state_seqno = seqno;
+    while (!found && (state_seqno > seqno - gc_distance_)) {
+        std::string buffer;
+        auto S = snapshot->get(std::to_string(state_seqno), buffer);
+        if (S.is_error()) {
+            LOG(ERROR) << "Failed to get state for seqno " << state_seqno << ": " << S.move_as_error();
+            state_seqno -= 1;
+            continue;
+        }
+        auto status = S.move_as_ok();
+        if (status == td::KeyValue::GetStatus::NotFound) {
+            state_seqno -= 1;
+            continue;
+        }
+
+        std::unordered_map<td::Bits256, TraceImplPtr, Bits256Hasher> pending_traces;
+        std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges;    
+        try {
+            size_t offset = 0;
+            msgpack::unpacked pending_traces_res;
+            msgpack::unpack(pending_traces_res, buffer.data(), buffer.size(), offset);
+            msgpack::object pending_traces_obj = pending_traces_res.get();
+
+            msgpack::unpacked pending_edges_res;
+            msgpack::unpack(pending_edges_res, buffer.data(), buffer.size(), offset);
+            msgpack::object pending_edges_obj = pending_edges_res.get();
+
+            pending_traces_obj.convert(pending_traces);
+            pending_edges_obj.convert(pending_edges);
+        } catch (const std::exception &e) {
+            LOG(ERROR) << "Failed to unpack state for seqno " << state_seqno << ": " << e.what();
+            state_seqno -= 1;
+            continue;
+        }
+        
+        pending_traces_ = std::move(pending_traces);
+        pending_edges_ = std::move(pending_edges);
+        found = true;
+    }
+
+    if (!found) {
+        return td::Status::Error(ton::ErrorCode::warning, "TraceAssembler state not found");
+    }
+    
+    return state_seqno;
+}
+
+td::Status TraceAssembler::save_state(ton::BlockSeqno seqno) {
+    std::stringstream buffer;
+    msgpack::pack(buffer, pending_traces_);
+    msgpack::pack(buffer, pending_edges_);
+    return kv_->set(std::to_string(seqno), buffer.str());
+}
+
+void TraceAssembler::gc_states(ton::BlockSeqno before_seqno) {
+    // TODO: optimize this, it's not efficient to read all keys
+    auto snapshot = kv_->snapshot();
+    std::vector<std::string> keys;
+    auto S = snapshot->for_each([&keys](td::Slice key, td::Slice value) {
+        keys.push_back(key.str());
+        return td::Status::OK();
+    });
+    if (S.is_error()) {
+        LOG(ERROR) << "Failed to get all keys: " << S.move_as_error();
+        return;
+    }
+
+    for (const auto &key : keys) {
+        auto seqno = std::stoll(key);
+        if (seqno < before_seqno) {
+            auto S = kv_->erase(key);
+            if (S.is_error()) {
+                LOG(ERROR) << "Failed to erase state for seqno " << seqno << ": " << S.move_as_error();
+            }
+        }
+    }
 }
 
 void TraceAssembler::process_queue() {
@@ -149,12 +192,16 @@ void TraceAssembler::process_queue() {
 
         // block processed
         queue_.erase(it);
+
+        save_state(expected_seqno_);
+        gc_states(expected_seqno_ - gc_distance_);
+
         expected_seqno_ += 1;
         it = queue_.find(expected_seqno_);
     }
 }
 
-void TraceAssembler::process_block(std::int32_t seqno, ParsedBlockPtr block) {
+void TraceAssembler::process_block(ton::BlockSeqno seqno, ParsedBlockPtr block) {
     // sort transactions by lt
     std::vector<std::reference_wrapper<schema::Transaction>> sorted_txs;
     for(auto& blk: block->blocks_) {
@@ -173,38 +220,32 @@ void TraceAssembler::process_block(std::int32_t seqno, ParsedBlockPtr block) {
     });
 
     // process transactions
-    std::vector<TraceEdgeImpl> edges_found_;
-    std::unordered_set<td::Bits256, Bits256Hasher> updated_traces_;
-    std::unordered_set<td::Bits256, Bits256Hasher> updated_edges_;
+    std::vector<TraceEdgeImpl> completed_edges;
+    std::unordered_set<td::Bits256, Bits256Hasher> updated_traces;
+    std::unordered_set<td::Bits256, Bits256Hasher> pending_edges_added;
     for(auto &tx : sorted_txs) {
-        process_transaction(seqno, tx.get(), edges_found_, updated_traces_, updated_edges_);
+        process_transaction(seqno, tx.get(), completed_edges, updated_traces, pending_edges_added);
     }
     std::unordered_map<td::Bits256, schema::Trace, Bits256Hasher> trace_map;
-    for (auto & trace_id : updated_traces_) {
+    for (auto &trace_id : updated_traces) {
         auto trace = pending_traces_[trace_id];
-        if(trace->pending_edges_ == 0) {
+        if (trace->pending_edges == 0) {
             if (trace->state != TraceImpl::State::broken) {
                 trace->state = TraceImpl::State::complete;
             }
             pending_traces_.erase(trace->trace_id);
-        } else if (trace->pending_edges_ < 0) {
+        } else if (trace->pending_edges < 0) {
             trace->state = TraceImpl::State::broken;
         }
         trace_map[trace_id] = trace->to_schema();
     }
-    for (auto & edge_hash : updated_edges_) {
-        auto edge = pending_edges_.find(edge_hash);
-        if (edge == pending_edges_.end()) {
-            LOG(ERROR) << "No edge found!";
-            std::_Exit(42);
-        }
-        edges_found_.push_back(edge->second);
-        if (!edge->second.incomplete) {
-            LOG(WARNING) << "Complete edge in pending_edges_!";
-            pending_edges_.erase(edge);
-        }
+    std::vector<TraceEdgeImpl> block_all_edges = completed_edges;
+    for (const auto &edge_hash : pending_edges_added) {
+        const auto &edge = pending_edges_[edge_hash];
+        assert(edge.incomplete);
+        block_all_edges.push_back(edge);
     }
-    for (auto &edge : edges_found_) {
+    for (const auto &edge : block_all_edges) {
         // update trace
         auto &trace_schema = trace_map[edge.trace_id];
         trace_schema.edges.push_back(edge.to_schema());
@@ -214,8 +255,8 @@ void TraceAssembler::process_block(std::int32_t seqno, ParsedBlockPtr block) {
     }
 }
 
-void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction& tx, std::vector<TraceEdgeImpl>& edges_found_, 
-        std::unordered_set<td::Bits256, Bits256Hasher>& updated_traces_, std::unordered_set<td::Bits256, Bits256Hasher>& updated_edges_) {
+void TraceAssembler::process_transaction(ton::BlockSeqno seqno, schema::Transaction& tx, std::vector<TraceEdgeImpl>& completed_edges, 
+        std::unordered_set<td::Bits256, Bits256Hasher>& updated_traces, std::unordered_set<td::Bits256, Bits256Hasher>& pending_edges_added) {
     TraceImplPtr trace = nullptr;
     if (tx.in_msg.has_value()) {
         auto &msg = tx.in_msg.value();
@@ -234,7 +275,7 @@ void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction
                     edge.type = TraceEdgeImpl::Type::ext;
                     edge.incomplete = false;
                     edge.broken = false;
-                } else if (msg.source && msg.source.value() == "-1:0000000000000000000000000000000000000000000000000000000000000000") {
+                } else if (msg.source.value() == "-1:0000000000000000000000000000000000000000000000000000000000000000") {
                     // system
                     edge.trace_id = tx.hash;
                     edge.msg_hash = msg.hash;
@@ -242,7 +283,7 @@ void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction
                     edge.left_tx = std::nullopt;
                     edge.right_tx = tx.hash;
                     edge.type = TraceEdgeImpl::Type::sys;
-                    edge.incomplete = tx.out_msgs.size() > 0;
+                    edge.incomplete = false;
                     edge.broken = false;
                 } else {
                     // broken edge
@@ -258,17 +299,17 @@ void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction
 
                 // trace
                 trace = std::make_shared<TraceImpl>(seqno, tx);
-                trace->edges_ += !edge.incomplete;
-                trace->pending_edges_ += edge.incomplete;
+                trace->edges += !edge.incomplete;
+                trace->pending_edges += edge.incomplete;
                 if(edge.broken) {
                     trace->state = TraceImpl::State::broken;
                     ++broken_count_;
                 }
                 if (edge.incomplete) {
                     pending_edges_.insert_or_assign(edge.msg_hash, edge);
-                    updated_edges_.insert(edge.msg_hash);
+                    pending_edges_added.insert(edge.msg_hash);
                 } else {
-                    edges_found_.push_back(edge);
+                    completed_edges.push_back(edge);
                 }
                 pending_traces_.insert_or_assign(trace->trace_id, trace);
             } else {
@@ -285,8 +326,8 @@ void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction
                         // LOG(ERROR) << "Broken trace for in_msg of tx: " << tx.hash;
                         // create a broken trace
                         trace = std::make_shared<TraceImpl>(seqno, tx);
-                        trace->edges_ += !edge.incomplete;
-                        trace->pending_edges_ += edge.incomplete;
+                        trace->edges += !edge.incomplete;
+                        trace->pending_edges += edge.incomplete;
                         trace->state = TraceImpl::State::broken;
                         
                         ++broken_count_;
@@ -297,25 +338,23 @@ void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction
                     }
                 }
 
-                edges_found_.push_back(edge);
+                completed_edges.push_back(edge);
                 pending_edges_.erase(edge_it);
-                if (updated_edges_.find(edge.msg_hash) != updated_edges_.end()) {
-                    updated_edges_.erase(edge.msg_hash);
-                }
+                pending_edges_added.erase(edge.msg_hash);
 
-                trace->pending_edges_ -= 1;
-                trace->edges_ += 1;
-                trace->nodes_ += 1;
+                trace->pending_edges -= 1;
+                trace->edges += 1;
+                trace->nodes += 1;
             }
         }
-        updated_traces_.insert(trace->trace_id);
+        updated_traces.insert(trace->trace_id);
 
         tx.trace_id = trace->trace_id;
         msg.trace_id = trace->trace_id;
     } else {
         trace = std::make_shared<TraceImpl>(seqno, tx);
         pending_traces_.insert_or_assign(trace->trace_id, trace);
-        updated_traces_.insert(trace->trace_id);
+        updated_traces.insert(trace->trace_id);
 
         tx.trace_id = trace->trace_id;
     }
@@ -333,13 +372,13 @@ void TraceAssembler::process_transaction(std::int32_t seqno, schema::Transaction
             edge.broken = false;
         }
         
-        trace->pending_edges_ += edge.incomplete;
-        trace->edges_ += !edge.incomplete;
+        trace->pending_edges += edge.incomplete;
+        trace->edges += !edge.incomplete;
         if (edge.incomplete) {
             pending_edges_.insert_or_assign(edge.msg_hash, edge);
-            updated_edges_.insert(edge.msg_hash);
+            pending_edges_added.insert(edge.msg_hash);
         } else {
-            edges_found_.push_back(edge);
+            completed_edges.push_back(edge);
         }
         msg.trace_id = trace->trace_id;
     }
