@@ -97,7 +97,7 @@ void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> 
             LOG(WARNING) << "Traces that started before block " << next_seqno << " will be marked as broken and not inserted.";
             td::actor::send_closure(SelfId, &IndexScheduler::got_trace_assembler_last_state_seqno, next_seqno - 1);
         } else {
-            LOG(INFO) << "Restored TraceAssembler state for seqno " << next_seqno - 1;
+            LOG(INFO) << "Restored TraceAssembler state for seqno " << R.ok();
             td::actor::send_closure(SelfId, &IndexScheduler::got_trace_assembler_last_state_seqno, R.move_as_ok());
         }
     });

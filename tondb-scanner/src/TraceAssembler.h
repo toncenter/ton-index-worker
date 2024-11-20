@@ -5,9 +5,6 @@
 #include "tddb/td/db/KeyValue.h"
 
 
-// 
-// Utils
-//
 struct Bits256Hasher {
   std::size_t operator()(const td::Bits256& k) const {
     std::size_t seed = 0;
@@ -18,15 +15,12 @@ struct Bits256Hasher {
   }
 };
 
-//
-// Trace datatypes
-//
 struct TraceEdgeImpl {
     using Type = schema::TraceEdge::Type;
 
     td::Bits256 trace_id;
     td::Bits256 msg_hash;
-    std::uint64_t msg_lt;
+    uint64_t msg_lt;
     std::optional<td::Bits256> left_tx;
     std::optional<td::Bits256> right_tx;
 
@@ -54,17 +48,17 @@ struct TraceImpl {
     ton::BlockSeqno mc_seqno_start;
     ton::BlockSeqno mc_seqno_end;
 
-    std::uint64_t start_lt;
-    std::uint32_t start_utime;
+    uint64_t start_lt;
+    uint32_t start_utime;
 
-    std::uint64_t end_lt{0};
-    std::uint32_t end_utime{0};
+    uint64_t end_lt{0};
+    uint32_t end_utime{0};
 
     State state{State::pending};
 
-    std::int64_t pending_edges{0};
-    std::int64_t edges{0};
-    std::int64_t nodes{0};
+    size_t pending_edges{0};
+    size_t edges{0};
+    size_t nodes{0};
 
     // methods
     TraceImpl() {}
@@ -80,15 +74,7 @@ struct TraceImpl {
 };
 MSGPACK_ADD_ENUM(TraceImpl::State);
 
-// struct TraceAssemblerState {
-//     std::vector<schema::TraceEdge> pending_edges;
-//     std::vector<schema::Trace> pending_traces;
-//     MSGPACK_DEFINE(pending_edges, pending_traces);
-// };
 
-//
-// TraceAssembler
-//
 class TraceAssembler: public td::actor::Actor {
     struct Task {
         ton::BlockSeqno seqno_;
@@ -101,7 +87,7 @@ class TraceAssembler: public td::actor::Actor {
     ton::BlockSeqno expected_seqno_{0};
     std::unique_ptr<td::KeyValue> kv_;
     std::map<ton::BlockSeqno, Task> queue_;
-    std::int64_t broken_count_{0};
+    size_t broken_count_{0};
 
     std::unordered_map<td::Bits256, TraceImplPtr, Bits256Hasher> pending_traces_;
     std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges_;

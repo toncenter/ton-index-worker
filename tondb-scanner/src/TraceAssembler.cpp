@@ -6,9 +6,7 @@
 #include "convert-utils.h"
 #include "tddb/td/db/RocksDb.h"
 
-//
-// Utils
-//
+
 schema::TraceEdge TraceEdgeImpl::to_schema() const {
     schema::TraceEdge result;
     result.trace_id = trace_id;
@@ -20,19 +18,6 @@ schema::TraceEdge TraceEdgeImpl::to_schema() const {
     result.incomplete = incomplete;
     result.broken = broken;
     return result;
-}
-
-TraceEdgeImpl TraceEdgeImpl::from_schema(const schema::TraceEdge& edge) {
-    TraceEdgeImpl edge_impl;
-    edge_impl.trace_id = edge.trace_id;
-    edge_impl.msg_hash = edge.msg_hash;
-    edge_impl.msg_lt = edge.msg_lt;
-    edge_impl.left_tx = edge.left_tx;
-    edge_impl.right_tx = edge.right_tx;
-    edge_impl.type = edge.type;
-    edge_impl.incomplete = edge.incomplete;
-    edge_impl.broken = edge.broken;
-    return edge_impl;
 }
 
 schema::Trace TraceImpl::to_schema() const {
@@ -52,26 +37,6 @@ schema::Trace TraceImpl::to_schema() const {
     return result;
 }
 
-TraceImplPtr TraceImpl::from_schema(const schema::Trace& trace) {
-    TraceImplPtr trace_impl = std::make_shared<TraceImpl>();
-    trace_impl->trace_id = trace.trace_id;
-    trace_impl->external_hash = trace.external_hash;
-    trace_impl->mc_seqno_start = trace.mc_seqno_start;
-    trace_impl->mc_seqno_end = trace.mc_seqno_end;
-    trace_impl->start_lt = trace.start_lt;
-    trace_impl->start_utime = trace.start_utime;
-    trace_impl->end_lt = trace.end_lt;
-    trace_impl->end_utime = trace.end_utime;
-    trace_impl->state = trace.state;
-    trace_impl->pending_edges = trace.pending_edges_;
-    trace_impl->edges = trace.edges_;
-    trace_impl->nodes = trace.nodes_;
-    return std::move(trace_impl);
-}
-
-//
-// TraceAssembler
-//
 TraceAssembler::TraceAssembler(std::string db_path, size_t gc_distance) : 
         db_path_(db_path), gc_distance_(gc_distance) {
     auto kv = td::RocksDb::open(db_path);
