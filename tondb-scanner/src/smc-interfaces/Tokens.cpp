@@ -451,6 +451,16 @@ td::Result<NftItemDetectorR::Result::DNSEntry> NftItemDetectorR::get_dns_entry_d
     }
   }
 
+  auto storage_bag_id_cell = records.lookup_ref(td::sha256_bits256("storage"));
+  if (storage_bag_id_cell.not_null()) {
+    tokens::gen::DNSRecord::Record_dns_storage_address dns_storage_record;
+    if (!tlb::unpack_cell(storage_bag_id_cell, dns_storage_record)) {
+      LOG(ERROR) << "Failed to unpack DNSRecord storage";
+    } else {
+      result.storage_bag_id = dns_storage_record.bag_id;
+    }
+  }
+
   return result;
 }
 

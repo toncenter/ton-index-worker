@@ -231,18 +231,19 @@ void StateBatchParser::start_up() {
                     LOG(ERROR) << "Failed to parse account " << addr_.to_hex() << ": " << account_r.move_as_error();
                     break;
                 }
-                auto account_state_ = account_r.move_as_ok();
-                result_.push_back(account_state_);
-                state_list.push_back(account_state_);
+                auto account_state = account_r.move_as_ok();
+                state_list.push_back(account_state);
                 break;
             }
             default: LOG(ERROR) << "Unknown account tag"; break;
         }
     }
+    
+    std::copy(state_list.begin(), state_list.end(), std::back_inserter(result_));
+
     if (options_.index_interfaces_) {
         process_account_states(state_list);
     } else {
-        std::copy(state_list.begin(), state_list.end(), std::back_inserter(result_));
         processing_finished();
     }
 }

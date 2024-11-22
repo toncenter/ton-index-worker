@@ -1382,7 +1382,7 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
       continue;
     }
     if (is_first) {
-      query << "INSERT INTO dns_entries (nft_item_address, nft_item_owner, domain, dns_next_resolver, dns_wallet, dns_site, last_transaction_lt) VALUES ";
+      query << "INSERT INTO dns_entries (nft_item_address, nft_item_owner, domain, dns_next_resolver, dns_wallet, dns_site_adnl, dns_storage_bag_id, last_transaction_lt) VALUES ";
       is_first = false;
     } else {
       query << ", ";
@@ -1404,6 +1404,10 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
     if (nft_item.dns_entry->site_adnl) {
       raw_dns_site = nft_item.dns_entry->site_adnl->to_hex();
     }
+    std::optional<std::string> raw_dns_storage_bag_id;
+    if (nft_item.dns_entry->storage_bag_id) {
+      raw_dns_storage_bag_id = nft_item.dns_entry->storage_bag_id->to_hex();
+    }
     query << "("
           << txn.quote(convert::to_raw_address(nft_item.address)) << ","
           << TO_SQL_OPTIONAL_STRING(raw_owner_address, txn) << ","
@@ -1411,6 +1415,7 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
           << TO_SQL_OPTIONAL_STRING(raw_dns_next_resolver, txn) << ","
           << TO_SQL_OPTIONAL_STRING(raw_dns_wallet, txn) << ","
           << TO_SQL_OPTIONAL_STRING(raw_dns_site, txn) << ","
+          << TO_SQL_OPTIONAL_STRING(raw_dns_storage_bag_id, txn) << ","
           << nft_item.last_transaction_lt
           << ")";
   }
@@ -1420,7 +1425,8 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
           << "domain = EXCLUDED.domain, "
           << "dns_next_resolver = EXCLUDED.dns_next_resolver, "
           << "dns_wallet = EXCLUDED.dns_wallet, "
-          << "dns_site = EXCLUDED.dns_site, "
+          << "dns_site_adnl = EXCLUDED.dns_site_adnl, "
+          << "dns_storage_bag_id = EXCLUDED.dns_storage_bag_id, "
           << "last_transaction_lt = EXCLUDED.last_transaction_lt "
           << "WHERE dns_entries.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
   }
@@ -2328,7 +2334,8 @@ void InsertManagerPostgres::start_up() {
       "domain varchar, "
       "dns_next_resolver tonaddr, "
       "dns_wallet tonaddr, "
-      "dns_site tonhash, "
+      "dns_site_adnl varchar(64), "
+      "dns_storage_bag_id varchar(64), "
       "last_transaction_lt bigint);\n"
     );
 

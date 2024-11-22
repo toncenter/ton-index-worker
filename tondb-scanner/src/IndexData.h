@@ -477,6 +477,7 @@ struct NFTItemDataV2 {
     std::optional<block::StdAddress> wallet;
     std::optional<block::StdAddress> next_resolver;
     std::optional<td::Bits256> site_adnl;
+    std::optional<td::Bits256> storage_bag_id;
   };
 
   block::StdAddress address;
