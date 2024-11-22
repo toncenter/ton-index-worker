@@ -315,7 +315,18 @@ void NftItemDetectorR::start_up() {
   }
 }
 
-const std::string dot_ton_dns_root_addr = "0:B774D95EB20543F186C06B371AB88AD704F7E256130CAF96189368A7D0CB6CCF";
+bool NftItemDetectorR::is_testnet = false;
+
+const auto dot_ton_dns_root_addr_mainnet = block::StdAddress::parse("0:B774D95EB20543F186C06B371AB88AD704F7E256130CAF96189368A7D0CB6CCF").move_as_ok();
+const auto dot_ton_dns_root_addr_testnet = block::StdAddress::parse("0:E33ED33A42EB2032059F97D90C706F8400BB256D32139CA707F1564AD699C7DD").move_as_ok();
+
+block::StdAddress NftItemDetectorR::get_dot_ton_dns_root_addr() {
+  if (is_testnet) {
+    return dot_ton_dns_root_addr_testnet;
+  } else {
+    return dot_ton_dns_root_addr_mainnet;
+  }
+}
 
 void NftItemDetectorR::got_collection(Result item_data, td::Ref<vm::Cell> ind_content, td::Ref<vm::Cell> collection_code, td::Ref<vm::Cell> collection_data) {
   auto verify = verify_with_collection(item_data.collection_address.value(), collection_code, collection_data, item_data.index);
@@ -333,7 +344,7 @@ void NftItemDetectorR::got_collection(Result item_data, td::Ref<vm::Cell> ind_co
   }
   item_data.content = content.move_as_ok();
 
-  if (convert::to_raw_address(item_data.collection_address.value()) == dot_ton_dns_root_addr) {
+  if (item_data.collection_address.value() == get_dot_ton_dns_root_addr()) {
     auto domain = get_domain();
     if (domain.is_error()) {
       promise_.set_error(content.move_as_error_prefix("failed to get .ton domain: "));

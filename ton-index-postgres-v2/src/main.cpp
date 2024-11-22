@@ -39,6 +39,7 @@ int main(int argc, char *argv[]) {
   bool custom_types = false;
   bool create_indexes = false;
   InsertManagerPostgres::Credential credential;
+  bool testnet = false;
 
   std::uint32_t max_active_tasks = 7;
   std::uint32_t max_insert_actors = 12;
@@ -96,6 +97,10 @@ int main(int argc, char *argv[]) {
   p.add_option('\0', "create-indexes", "Create indexes in database", [&]() {
     create_indexes = true;
     LOG(WARNING) << "Indexes will be created on launch. It may take several hours!";
+  });
+
+  p.add_option('\0', "testnet", "Use for testnet. It is used for correct indexing of .ton DNS entries (in testnet .ton collection has a different address)", [&]() {
+    testnet = true;
   });
 
   p.add_checked_option('f', "from", "Masterchain seqno to start indexing from", [&](td::Slice value) { 
@@ -299,6 +304,8 @@ int main(int argc, char *argv[]) {
     batch_size.msgs_ = max_batch_size;
     batch_size.traces_ = max_batch_size;
   }
+
+  NftItemDetectorR::is_testnet = testnet;
 
   auto watcher = td::create_shared_destructor([] {
     td::actor::SchedulerContext::get()->stop();

@@ -82,6 +82,8 @@ public:
     std::optional<DNSEntry> dns_entry;
   };
 
+  static bool is_testnet;
+
   NftItemDetectorR(block::StdAddress address, 
                        td::Ref<vm::Cell> code_cell,
                        td::Ref<vm::Cell> data_cell, 
@@ -98,6 +100,7 @@ private:
                                                             td::Ref<vm::Cell> collection_code, td::Ref<vm::Cell> collection_data);
   td::Result<NftItemDetectorR::Result::DNSEntry> get_dns_entry_data();
   td::Result<std::string> get_domain();
+  block::StdAddress get_dot_ton_dns_root_addr();
 
   block::StdAddress address_;
   td::Ref<vm::Cell> code_cell_;
