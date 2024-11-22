@@ -378,7 +378,7 @@ void PostgreSQLInsertManager::start_up() {
 
 void PostgreSQLInsertManager::alarm() {
   alarm_timestamp() = td::Timestamp::in(10.0);
-  LOG(INFO) << "Inserted: " << inserted_count_ << " In progress: " << in_progress_;
+  LOG(INFO) << "Inserted: " << inserted_count_ << ". Batches in progress: " << in_progress_;
   check_queue(true);
 }
 
@@ -394,17 +394,17 @@ void PostgreSQLInsertManager::check_queue(bool force) {
       } else {
         // LOG(INFO) << "Inserted " << len << " states";
       }
-      td::actor::send_closure(SelfId, &PostgreSQLInsertManager::insert_done);
+      td::actor::send_closure(SelfId, &PostgreSQLInsertManager::insert_done, len);
     });
 
     ++in_progress_;
-    inserted_count_ += to_insert.size();
     td::actor::create_actor<PostgreSQLInserter>("PostgresInserter", connection_string_, to_insert, std::move(P)).release();
   }
 }
 
-void PostgreSQLInsertManager::insert_done() {
+void PostgreSQLInsertManager::insert_done(size_t cnt) {
   --in_progress_;
+  inserted_count_ += cnt;
 }
 
 void PostgreSQLInsertManager::checkpoint(ton::ShardIdFull shard, td::Bits256 cur_addr_) {

@@ -183,6 +183,7 @@ void StateBatchParser::interfaces_detected(block::StdAddress address, std::vecto
             }
         }, interface);
     }
+    promise.set_value(td::Unit());
 }
 
 void StateBatchParser::process_account_states(std::vector<schema::AccountState> account_states) {
