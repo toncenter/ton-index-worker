@@ -9,7 +9,7 @@
 
 
 
-using InsertData = std::variant<schema::AccountState, JettonMasterData, JettonWalletData>;
+using InsertData = std::variant<schema::AccountState, JettonMasterDataV2, JettonWalletDataV2, NFTItemDataV2, NFTCollectionDataV2>;
 
 class PostgreSQLInserter : public td::actor::Actor {
 public:
@@ -21,6 +21,8 @@ private:
     void insert_latest_account_states(pqxx::work &transaction);
     void insert_jetton_masters(pqxx::work &transaction);
     void insert_jetton_wallets(pqxx::work &transaction);
+    void insert_nft_items(pqxx::work &transaction);
+    void insert_nft_collections(pqxx::work &transaction);
 
     std::string connection_string_;
     std::vector<InsertData> data_;
