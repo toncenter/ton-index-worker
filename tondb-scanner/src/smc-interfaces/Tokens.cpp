@@ -319,13 +319,20 @@ bool NftItemDetectorR::is_testnet = false;
 
 const auto dot_ton_dns_root_addr_mainnet = block::StdAddress::parse("0:B774D95EB20543F186C06B371AB88AD704F7E256130CAF96189368A7D0CB6CCF").move_as_ok();
 const auto dot_ton_dns_root_addr_testnet = block::StdAddress::parse("0:E33ED33A42EB2032059F97D90C706F8400BB256D32139CA707F1564AD699C7DD").move_as_ok();
+const auto dot_t_dot_me_dns_root_addr_mainnet = block::StdAddress::parse("0:80D78A35F955A14B679FAA887FF4CD5BFC0F43B4A4EEA2A7E6927F3701B273C2").move_as_ok();
 
 block::StdAddress NftItemDetectorR::get_dot_ton_dns_root_addr() {
   if (is_testnet) {
     return dot_ton_dns_root_addr_testnet;
-  } else {
-    return dot_ton_dns_root_addr_mainnet;
   }
+  return dot_ton_dns_root_addr_mainnet;
+}
+
+std::optional<block::StdAddress> NftItemDetectorR::dot_t_dot_me_dns_root_addr() {
+  if (is_testnet) {
+    return std::nullopt;  
+  }
+  return dot_t_dot_me_dns_root_addr_mainnet;
 }
 
 void NftItemDetectorR::got_collection(Result item_data, td::Ref<vm::Cell> ind_content, td::Ref<vm::Cell> collection_code, td::Ref<vm::Cell> collection_data) {
@@ -344,19 +351,10 @@ void NftItemDetectorR::got_collection(Result item_data, td::Ref<vm::Cell> ind_co
   }
   item_data.content = content.move_as_ok();
 
-  if (item_data.collection_address.value() == get_dot_ton_dns_root_addr()) {
-    auto domain = get_domain();
-    if (domain.is_error()) {
-      promise_.set_error(content.move_as_error_prefix("failed to get .ton domain: "));
-    }
-    item_data.content.value()["domain"] = domain.ok();
-
-    auto dns_data = get_dns_entry_data();
-    
-    if (dns_data.is_ok()) {
-      dns_data.ok_ref().domain = domain.move_as_ok();
-      item_data.dns_entry = dns_data.move_as_ok();
-    }
+  process_domain_and_dns_data(get_dot_ton_dns_root_addr(), [this](){ return this->get_ton_domain(); }, item_data);
+  auto t_me_root = dot_t_dot_me_dns_root_addr();
+  if (t_me_root) {
+      process_domain_and_dns_data(t_me_root.value(), [this](){ return this->get_t_me_domain(); }, item_data);
   }
 
   promise_.set_value(std::move(item_data));
@@ -386,6 +384,24 @@ td::Result<std::map<std::string, std::string>> NftItemDetectorR::get_content(td:
     {vm::StackEntry(index), vm::StackEntry(ind_content)}, {vm::StackEntry::Type::t_cell}));
 
   return parse_token_data(stack[0].as_cell());
+}
+
+void NftItemDetectorR::process_domain_and_dns_data(const block::StdAddress& root_address, const std::function<td::Result<std::string>()>& get_domain_function, Result& item_data) {
+  if (!item_data.collection_address.has_value() || !(item_data.collection_address.value() == root_address)) {
+    return;
+  }
+  auto domain = get_domain_function();
+  if (domain.is_error()) {
+    LOG(ERROR) << "Failed to get domain for " << address_ << ": " << domain.move_as_error();
+  } else {
+    item_data.content.value()["domain"] = domain.ok();
+
+    auto dns_data = get_dns_entry_data();
+    if (dns_data.is_ok()) {
+        dns_data.ok_ref().domain = domain.move_as_ok();
+        item_data.dns_entry = dns_data.move_as_ok();
+    }
+  }
 }
 
 td::Result<NftItemDetectorR::Result::DNSEntry> NftItemDetectorR::get_dns_entry_data() {
@@ -464,7 +480,7 @@ td::Result<NftItemDetectorR::Result::DNSEntry> NftItemDetectorR::get_dns_entry_d
   return result;
 }
 
-td::Result<std::string> NftItemDetectorR::get_domain() {
+td::Result<std::string> NftItemDetectorR::get_ton_domain() {
   TRY_RESULT(stack, execute_smc_method<1>(address_, code_cell_, data_cell_, config_, "get_domain", {}, {vm::StackEntry::Type::t_slice}));
   auto cs = stack[0].as_slice();
 
@@ -480,6 +496,42 @@ td::Result<std::string> NftItemDetectorR::get_domain() {
     }
   }
   return td::Status::Error("get_domain returned unexpected result");
+}
+
+td::Result<std::string> NftItemDetectorR::get_t_me_domain() {
+  TRY_RESULT(stack, execute_smc_method<1>(address_, code_cell_, data_cell_, config_, "get_full_domain", {}, {vm::StackEntry::Type::t_slice}));
+  auto cs = stack[0].as_slice();
+
+  if (cs.not_null()) {
+    auto size = cs->size();
+    if (size % 8 == 0) {
+      auto cnt = size / 8;
+      unsigned char tmp[1024];
+      cs.write().fetch_bytes(tmp, cnt);
+      std::string s{tmp, tmp + cnt};
+      
+      // convert "me\0t\0username\0" to "username.t.me"
+      std::string c;
+      std::vector<std::string> parts;
+      for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '\0') {
+          parts.push_back(c);
+          c = "";
+        } else {
+          c += s[i];
+        }
+      }
+      std::string result;
+      for (int16_t i = parts.size() - 1; i >= 0; i--) {
+        result += parts[i];
+        if (i != 0) {
+          result += ".";
+        }
+      }
+      return result;
+    }
+  }
+  return td::Status::Error("get_full_domain returned unexpected result");
 }
 
 NftCollectionDetectorR::NftCollectionDetectorR(block::StdAddress address, 
