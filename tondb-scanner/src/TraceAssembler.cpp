@@ -72,7 +72,8 @@ td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno)
     auto snapshot = kv_->snapshot();
     bool found = false;
     auto state_seqno = seqno;
-    while (!found && (state_seqno > seqno - gc_distance_)) {
+    auto from_seqno = seqno > gc_distance_ ? seqno - gc_distance_ : 0;
+    while (!found && (state_seqno > from_seqno)) {
         std::string buffer;
         auto S = snapshot->get(std::to_string(state_seqno), buffer);
         if (S.is_error()) {
@@ -159,7 +160,9 @@ void TraceAssembler::process_queue() {
         queue_.erase(it);
 
         save_state(expected_seqno_);
-        gc_states(expected_seqno_ - gc_distance_);
+        if (expected_seqno_ > gc_distance_) {
+            gc_states(expected_seqno_ - gc_distance_);
+        }
 
         expected_seqno_ += 1;
         it = queue_.find(expected_seqno_);
