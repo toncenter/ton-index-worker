@@ -6,10 +6,15 @@
 #include "validator/interfaces/block.h"
 #include "validator/interfaces/shard.h"
 
+#include "crypto/block/block.h"
+#include "crypto/block/block-auto.h"
+#include "crypto/block/block-parse.h"
+
 using namespace ton::validator;
 
 struct BlockInfo {
     ton::BlockSeqno mc_seqno;
+    ton::BlockId id;
     td::Ref<BlockData> data;
     td::Ref<vm::Cell> state;
 };
@@ -40,6 +45,9 @@ public:
             return;
         }
         data_ = res.move_as_ok();
+        if (data_.is_null()) {
+            block_read_query_finished(td::Status::Error("data is null"));
+        }
         auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<td::Ref<vm::Cell>> R) {
           td::actor::send_closure(SelfId, &BlockReadQuery::got_block_state, std::move(R));
         });
@@ -53,13 +61,37 @@ public:
             return;
         }
         state_ = res.move_as_ok();
+        if (state_.is_null()) {
+            block_read_query_finished(td::Status::Error("state is null"));
+        }
 
-        if (data_.is_null()) {
-            promise_.set_error(td::Status::Error("data is null"));
-        } else if (state_.is_null()) {
-            promise_.set_error(td::Status::Error("state is null"));
+        td::actor::send_closure(actor_id(this), &BlockReadQuery::debug_step);
+    }
+
+    void debug_step() {
+        td::Status result;
+        block::gen::Block::Record blk;
+        if (!tlb::unpack_cell(data_->root_cell(), blk)) {
+            block_read_query_finished(td::Status::Error("failed to unpack block::gen::Block::Record"));
+        }
+        block::gen::BlockInfo::Record info;
+        if(!tlb::unpack_cell(blk.info, info)) {
+            block_read_query_finished(td::Status::Error("failed to unpack block::gen::BlockInfo"));
+        }
+        block::gen::BlockExtra::Record extra;
+        if(!tlb::unpack_cell(blk.extra, extra)) {
+            block_read_query_finished(td::Status::Error("failed to unpack block::gen::BlockExtra::Record"));
+        }
+        LOG(INFO) << "DEBUG STEP!";
+
+        block_read_query_finished(td::Status::OK());
+    }
+
+    void block_read_query_finished(td::Status status) {
+        if (status.is_error()) {
+            promise_.set_error(std::move(status));
         } else {
-            promise_.set_value(BlockInfo{mc_seqno_, std::move(data_), std::move(state_)});
+            promise_.set_value(BlockInfo{mc_seqno_, handle_->id().id, std::move(data_), std::move(state_)});
         }
         stop();
     }
@@ -72,9 +104,12 @@ class MasterchainBlockReadQuery: public td::actor::Actor {
     td::Promise<bool> promise_;
 
     BlockInfo mc_block_info_;
+    std::set<ton::BlockId> current_shard_blk_ids_;
+    std::set<ConstBlockHandle> handles_;
+    std::vector<BlockInfo> blocks_;
 public:
     explicit MasterchainBlockReadQuery(td::actor::ActorId<RootDb> db, const ton::BlockSeqno& seqno, td::Promise<bool> promise):
-    db_(std::move(db)), seqno_(seqno), promise_(std::move(promise)) {}
+        db_(std::move(db)), seqno_(seqno), promise_(std::move(promise)), mc_block_info_() {}
 
     void start_up() override {
         auto P = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<ConstBlockHandle> R) {
@@ -105,6 +140,36 @@ public:
         }
         mc_block_info_ = res.move_as_ok();
         LOG(INFO) << "Masterchain block " << mc_block_info_.mc_seqno << " data read";
+
+        // read shards
+        block::gen::McStateExtra::Record mc_extra;
+        block::gen::ShardStateUnsplit::Record state;
+        block::gen::McStateExtra::Record extra;
+        block::ShardConfig shards_config;
+        if (!tlb::unpack_cell(mc_block_info_.state, state)) {
+            promise_.set_error(td::Status::Error("failed to unpack block::gen::ShardStateUnsplit::Record"));
+            stop();
+            return;
+        }
+        if (!tlb::unpack_cell(state.custom->prefetch_ref(), extra)) {
+            promise_.set_error(td::Status::Error("failed to unpack block::gen::McStateExtra::Record"));
+            stop();
+            return;
+        }
+        if (!shards_config.unpack(extra.shard_hashes)) {
+            promise_.set_error(td::Status::Error("failed to unpack block::ShardConfig"));
+            stop();
+            return;
+        }
+
+        for (auto &w : shards_config.get_workchains()) {
+            LOG(INFO) << "Workchain: " << w;
+        }
+
+        for (auto &s : shards_config.get_shard_hash_ids(true)) {
+            LOG(INFO) << "Shard: " << s.to_str();
+        }
+
         promise_.set_value(true);
         stop();
     }
@@ -124,7 +189,7 @@ void SandboxActor::start_up() {
 
     get_last_block();
     get_first_block();
-    alarm_timestamp() = td::Timestamp::in(1.0);
+    // alarm_timestamp() = td::Timestamp::in(1.0);
 }
 
 void SandboxActor::alarm() {
@@ -164,7 +229,7 @@ void SandboxActor::get_block(ton::BlockSeqno mc_seqno) {
             LOG(ERROR) << "Seqno: " << mc_seqno << " Error: " << R.move_as_error();
             return;
         }
-        td::actor::send_closure(SelfId, &SandboxActor::get_block, mc_seqno - 1);
+        // td::actor::send_closure(SelfId, &SandboxActor::get_block, mc_seqno - 1);
     });
     td::actor::create_actor<MasterchainBlockReadQuery>("query", db_.get(), mc_seqno, std::move(P)).release();
 }
