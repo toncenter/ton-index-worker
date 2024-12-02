@@ -53,6 +53,10 @@ void TraceAssembler::start_up() {
 void TraceAssembler::alarm() {
     alarm_timestamp() = td::Timestamp::in(60.0);
 
+    if (expected_seqno_ > gc_distance_) {
+        gc_states(expected_seqno_ - gc_distance_);
+    }
+
     LOG(INFO) << " Pending traces: " << pending_traces_.size()
               << " Pending edges: " << pending_edges_.size()
               << " Broken traces: " << broken_count_;
@@ -68,6 +72,20 @@ void TraceAssembler::set_expected_seqno(ton::BlockSeqno new_expected_seqno) {
     expected_seqno_ = new_expected_seqno;
 }
 
+std::string seqno_to_rocksdb_key(ton::BlockSeqno seqno) {
+    // return std::to_string(seqno);
+    uint64_t big_endian_key = htobe64(seqno);
+    const char* key_data = reinterpret_cast<const char*>(&big_endian_key);
+    return std::string(key_data, sizeof(uint64_t));
+}
+
+ton::BlockSeqno rocksdb_key_to_seqno(td::Slice key) {
+    // return std::stoll(key.str());
+    ton::BlockSeqno value_raw;
+    memcpy(&value_raw, key.data(), sizeof(ton::BlockSeqno));
+    return be64toh(value_raw);
+}
+
 td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno) {
     auto snapshot = kv_->snapshot();
     bool found = false;
@@ -75,7 +93,8 @@ td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno)
     auto from_seqno = seqno > gc_distance_ ? seqno - gc_distance_ : 0;
     while (!found && (state_seqno > from_seqno)) {
         std::string buffer;
-        auto S = snapshot->get(std::to_string(state_seqno), buffer);
+        auto key = seqno_to_rocksdb_key(state_seqno);
+        auto S = snapshot->get(td::Slice(key.c_str(), sizeof(ton::BlockSeqno)), buffer);
         if (S.is_error()) {
             LOG(ERROR) << "Failed to get state for seqno " << state_seqno << ": " << S.move_as_error();
             state_seqno -= 1;
@@ -123,15 +142,25 @@ td::Status TraceAssembler::save_state(ton::BlockSeqno seqno) {
     std::stringstream buffer;
     msgpack::pack(buffer, pending_traces_);
     msgpack::pack(buffer, pending_edges_);
-    return kv_->set(std::to_string(seqno), buffer.str());
+ 
+    return kv_->set(seqno_to_rocksdb_key(seqno), buffer.str());
 }
 
 void TraceAssembler::gc_states(ton::BlockSeqno before_seqno) {
-    // TODO: optimize this, it's not efficient to read all keys
+    LOG(INFO) << "gc_states start " << before_seqno;
     auto snapshot = kv_->snapshot();
-    std::vector<std::string> keys;
-    auto S = snapshot->for_each([&keys](td::Slice key, td::Slice value) {
-        keys.push_back(key.str());
+    std::vector<std::string> to_delete;
+    auto S = snapshot->for_each([&to_delete, before_seqno](td::Slice key, td::Slice value, bool& stop) {
+        ton::BlockSeqno seqno = rocksdb_key_to_seqno(key);
+        LOG(INFO) << "gc_states iterating " << seqno << " " << key.str();
+        if (seqno < before_seqno) {
+            if (seqno != 0) {
+                to_delete.push_back(key.str());
+            }
+        } else {
+            LOG(INFO) << "gc_states stopped";
+            stop = true;
+        }
         return td::Status::OK();
     });
     if (S.is_error()) {
@@ -139,15 +168,18 @@ void TraceAssembler::gc_states(ton::BlockSeqno before_seqno) {
         return;
     }
 
-    for (const auto &key : keys) {
-        auto seqno = std::stoll(key);
-        if (seqno < before_seqno) {
-            auto S = kv_->erase(key);
-            if (S.is_error()) {
-                LOG(ERROR) << "Failed to erase state for seqno " << seqno << ": " << S.move_as_error();
-            }
+    for (const auto &key : to_delete) {
+        auto S = kv_->erase(key);
+        if (S.is_error()) {
+            LOG(ERROR) << "Failed to erase state for seqno " << rocksdb_key_to_seqno(key) << ": " << S.move_as_error();
         }
     }
+    if (to_delete.size()) {
+        auto first_key = to_delete.front();
+        auto last_key = to_delete.back();
+        LOG(INFO) << "Deleted " << to_delete.size() << " old states: " << rocksdb_key_to_seqno(first_key) << " to " << rocksdb_key_to_seqno(last_key);
+    }
+
 }
 
 void TraceAssembler::process_queue() {
@@ -160,9 +192,6 @@ void TraceAssembler::process_queue() {
         queue_.erase(it);
 
         save_state(expected_seqno_);
-        if (expected_seqno_ > gc_distance_) {
-            gc_states(expected_seqno_ - gc_distance_);
-        }
 
         expected_seqno_ += 1;
         it = queue_.find(expected_seqno_);
