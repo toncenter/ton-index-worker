@@ -102,7 +102,7 @@ public:
     void alarm() override;
 private:
     td::Status save_state(ton::BlockSeqno seqno);
-    void gc_states(ton::BlockSeqno before_seqno);
+    td::Status gc_states(ton::BlockSeqno before_seqno);
     void process_queue();
     void process_block(ton::BlockSeqno seqno, ParsedBlockPtr block);
     void process_transaction(ton::BlockSeqno seqno, schema::Transaction& tx, std::vector<TraceEdgeImpl>& edges_found_, 

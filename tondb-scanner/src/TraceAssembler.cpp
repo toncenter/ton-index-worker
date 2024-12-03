@@ -54,7 +54,10 @@ void TraceAssembler::alarm() {
     alarm_timestamp() = td::Timestamp::in(60.0);
 
     if (expected_seqno_ > gc_distance_) {
-        gc_states(expected_seqno_ - gc_distance_);
+        auto gc_status = gc_states(expected_seqno_ - gc_distance_);
+        if (gc_status.is_error()) {
+            LOG(ERROR) << "Error while garbage collecting Trace Assembler states: " << gc_status.move_as_error();
+        }
     }
 
     LOG(INFO) << " Pending traces: " << pending_traces_.size()
@@ -72,18 +75,22 @@ void TraceAssembler::set_expected_seqno(ton::BlockSeqno new_expected_seqno) {
     expected_seqno_ = new_expected_seqno;
 }
 
+void printStringAsHex(const std::string& str) {
+    for (unsigned char c : str) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c) << " ";
+    }
+    std::cout << std::dec << std::endl; // Reset to decimal output
+}
+
 std::string seqno_to_rocksdb_key(ton::BlockSeqno seqno) {
-    // return std::to_string(seqno);
-    uint64_t big_endian_key = htobe64(seqno);
+    uint32_t big_endian_key = htobe32(seqno);
     const char* key_data = reinterpret_cast<const char*>(&big_endian_key);
-    return std::string(key_data, sizeof(uint64_t));
+    return std::string(key_data, sizeof(ton::BlockSeqno));
 }
 
 ton::BlockSeqno rocksdb_key_to_seqno(td::Slice key) {
-    // return std::stoll(key.str());
-    ton::BlockSeqno value_raw;
-    memcpy(&value_raw, key.data(), sizeof(ton::BlockSeqno));
-    return be64toh(value_raw);
+    const ton::BlockSeqno *value_raw = reinterpret_cast<const ton::BlockSeqno *>(key.data());
+    return be32toh(*value_raw);
 }
 
 td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno) {
@@ -93,8 +100,8 @@ td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno)
     auto from_seqno = seqno > gc_distance_ ? seqno - gc_distance_ : 0;
     while (!found && (state_seqno > from_seqno)) {
         std::string buffer;
-        auto key = seqno_to_rocksdb_key(state_seqno);
-        auto S = snapshot->get(td::Slice(key.c_str(), sizeof(ton::BlockSeqno)), buffer);
+        auto key = std::to_string(state_seqno);
+        auto S = snapshot->get(key, buffer);
         if (S.is_error()) {
             LOG(ERROR) << "Failed to get state for seqno " << state_seqno << ": " << S.move_as_error();
             state_seqno -= 1;
@@ -143,43 +150,25 @@ td::Status TraceAssembler::save_state(ton::BlockSeqno seqno) {
     msgpack::pack(buffer, pending_traces_);
     msgpack::pack(buffer, pending_edges_);
  
-    return kv_->set(seqno_to_rocksdb_key(seqno), buffer.str());
+    return kv_->set(std::to_string(seqno), buffer.str());
 }
 
-void TraceAssembler::gc_states(ton::BlockSeqno before_seqno) {
-    LOG(INFO) << "gc_states start " << before_seqno;
-    auto snapshot = kv_->snapshot();
-    std::vector<std::string> to_delete;
-    auto S = snapshot->for_each([&to_delete, before_seqno](td::Slice key, td::Slice value, bool& stop) {
-        ton::BlockSeqno seqno = rocksdb_key_to_seqno(key);
-        LOG(INFO) << "gc_states iterating " << seqno << " " << key.str();
-        if (seqno < before_seqno) {
-            if (seqno != 0) {
-                to_delete.push_back(key.str());
-            }
-        } else {
-            LOG(INFO) << "gc_states stopped";
-            stop = true;
-        }
+td::Status TraceAssembler::gc_states(ton::BlockSeqno before_seqno) {
+    std::string last_gcd_seqno_value;
+    auto res = kv_->get("last_gcd", last_gcd_seqno_value);
+    if (res.is_error() || res.ok() == td::KeyValueReader::GetStatus::NotFound) {
+        TRY_STATUS(kv_->set("last_gcd", std::to_string(before_seqno)));
         return td::Status::OK();
-    });
-    if (S.is_error()) {
-        LOG(ERROR) << "Failed to get all keys: " << S.move_as_error();
-        return;
     }
-
-    for (const auto &key : to_delete) {
-        auto S = kv_->erase(key);
-        if (S.is_error()) {
-            LOG(ERROR) << "Failed to erase state for seqno " << rocksdb_key_to_seqno(key) << ": " << S.move_as_error();
-        }
+    ton::BlockSeqno last_gcd_seqno = std::stoul(last_gcd_seqno_value);
+    
+    TRY_STATUS(kv_->begin_write_batch());
+    for (auto c = last_gcd_seqno; c < before_seqno; c++) {
+        TRY_STATUS(kv_->erase(std::to_string(c)));
     }
-    if (to_delete.size()) {
-        auto first_key = to_delete.front();
-        auto last_key = to_delete.back();
-        LOG(INFO) << "Deleted " << to_delete.size() << " old states: " << rocksdb_key_to_seqno(first_key) << " to " << rocksdb_key_to_seqno(last_key);
-    }
-
+    TRY_STATUS(kv_->set("last_gcd", std::to_string(before_seqno)));
+    TRY_STATUS(kv_->begin_write_batch());
+    return td::Status::OK();
 }
 
 void TraceAssembler::process_queue() {
@@ -191,7 +180,10 @@ void TraceAssembler::process_queue() {
         // block processed
         queue_.erase(it);
 
-        save_state(expected_seqno_);
+        auto save_status = save_state(expected_seqno_);
+        if (save_status.is_error()) {
+            LOG(ERROR) << "Error while saving Trace Assembler state: " << save_status.move_as_error();
+        }
 
         expected_seqno_ += 1;
         it = queue_.find(expected_seqno_);
