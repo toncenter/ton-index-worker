@@ -1,11 +1,13 @@
 #include <map>
-#include <functional>
-
+#include <filesystem>
 #include "TraceAssembler.h"
 #include "td/utils/JsonBuilder.h"
+#include "td/utils/filesystem.h"
+#include "td/utils/port/path.h"
+#include "common/delay.h"
 #include "convert-utils.h"
-#include "tddb/td/db/RocksDb.h"
 
+namespace fs = std::filesystem;
 
 schema::TraceEdge TraceEdgeImpl::to_schema() const {
     schema::TraceEdge result;
@@ -39,26 +41,75 @@ schema::Trace TraceImpl::to_schema() const {
 
 TraceAssembler::TraceAssembler(std::string db_path, size_t gc_distance) : 
         db_path_(db_path), gc_distance_(gc_distance) {
-    auto kv = td::RocksDb::open(db_path);
-    if (kv.is_error()) {
-        LOG(FATAL) << "Failed to open RocksDB: " << kv.error();
-    }
-    kv_ = std::make_unique<td::RocksDb>(kv.move_as_ok());
+    td::mkdir(db_path).ensure();
 }
 
 void TraceAssembler::start_up() {
-    alarm_timestamp() = td::Timestamp::in(60.0);
+    alarm_timestamp() = td::Timestamp::in(10.0);
+}
+
+td::Status gc_states(std::string db_path, ton::BlockSeqno current_seqno, size_t keep_last) {
+    std::map<int, fs::path, std::greater<int>> fileMap;
+
+    for (const auto& entry : fs::directory_iterator(db_path)) {
+        if (fs::is_regular_file(entry.status())) {
+            auto filename = entry.path().stem().string();
+            auto extension = entry.path().extension().string();
+
+            if (extension == ".tastate") {
+                try {
+                    int seqno = std::stoi(filename);
+                    fileMap[seqno] = entry.path();
+                } catch (const std::exception& e) {
+                    LOG(ERROR) << "Error reading seqno of trace assembler state " << entry.path().string();
+                }
+            }
+        }
+    }
+
+    int count = 0;
+    for (const auto& [seqno, filepath] : fileMap) {
+        if (seqno > current_seqno) {
+            LOG(WARNING) << "Deleting state " << filepath.string() << " that is higher than currently processing seqno " << current_seqno;
+            fs::remove(filepath);
+        } else if (count >= keep_last) {
+            fs::remove(filepath);
+            LOG(INFO) << "Deleting old state: " << filepath.string();
+        } else {
+            LOG(INFO) << "Keeping state: " << filepath.string();
+            count++;
+        }
+    }
+    return td::Status::OK();
+}
+
+td::Status save_state(std::string db_path, ton::BlockSeqno seqno, 
+                      std::unordered_map<td::Bits256, TraceImplPtr, Bits256Hasher> pending_traces,
+                      std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges) {
+    std::stringstream buffer;
+    msgpack::pack(buffer, pending_traces);
+    msgpack::pack(buffer, pending_edges);
+ 
+    auto path = db_path + "/" + std::to_string(seqno) + ".tastate";
+    return td::atomic_write_file(path, buffer.str());
 }
 
 void TraceAssembler::alarm() {
-    alarm_timestamp() = td::Timestamp::in(60.0);
+    alarm_timestamp() = td::Timestamp::in(10.0);
 
-    if (expected_seqno_ > gc_distance_) {
-        auto gc_status = gc_states(expected_seqno_ - gc_distance_);
-        if (gc_status.is_error()) {
-            LOG(ERROR) << "Error while garbage collecting Trace Assembler states: " << gc_status.move_as_error();
+    ton::delay_action([this, seqno = expected_seqno_ - 1, pending_traces = pending_traces_, pending_edges = pending_edges_]() {
+        auto S = save_state(this->db_path_, expected_seqno_ - 1, pending_traces_, pending_edges_);
+        if (S.is_error()) {
+            LOG(ERROR) << "Error while saving Trace Assembler state: " << S.move_as_error();
         }
-    }
+    }, td::Timestamp::now());
+
+    ton::delay_action([this]() {
+        auto S = gc_states(this->db_path_, this->expected_seqno_, 10);
+        if (S.is_error()) {
+            LOG(ERROR) << "Error while garbage collecting Trace Assembler states: " << S.move_as_error();
+        }
+    }, td::Timestamp::now());
 
     LOG(INFO) << " Pending traces: " << pending_traces_.size()
               << " Pending edges: " << pending_edges_.size()
@@ -75,43 +126,40 @@ void TraceAssembler::set_expected_seqno(ton::BlockSeqno new_expected_seqno) {
     expected_seqno_ = new_expected_seqno;
 }
 
-void printStringAsHex(const std::string& str) {
-    for (unsigned char c : str) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c) << " ";
-    }
-    std::cout << std::dec << std::endl; // Reset to decimal output
-}
-
-std::string seqno_to_rocksdb_key(ton::BlockSeqno seqno) {
-    uint32_t big_endian_key = htobe32(seqno);
-    const char* key_data = reinterpret_cast<const char*>(&big_endian_key);
-    return std::string(key_data, sizeof(ton::BlockSeqno));
-}
-
-ton::BlockSeqno rocksdb_key_to_seqno(td::Slice key) {
-    const ton::BlockSeqno *value_raw = reinterpret_cast<const ton::BlockSeqno *>(key.data());
-    return be32toh(*value_raw);
-}
-
 td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno) {
-    auto snapshot = kv_->snapshot();
-    bool found = false;
-    auto state_seqno = seqno;
-    auto from_seqno = seqno > gc_distance_ ? seqno - gc_distance_ : 0;
-    while (!found && (state_seqno > from_seqno)) {
-        std::string buffer;
-        auto key = std::to_string(state_seqno);
-        auto S = snapshot->get(key, buffer);
-        if (S.is_error()) {
-            LOG(ERROR) << "Failed to get state for seqno " << state_seqno << ": " << S.move_as_error();
-            state_seqno -= 1;
+    std::map<int, fs::path, std::greater<int>> fileMap;
+    try {
+        for (const auto& entry : fs::directory_iterator(db_path_)) {
+            if (fs::is_regular_file(entry.status())) {
+                auto filename = entry.path().stem().string();  // Get filename without extension
+                auto extension = entry.path().extension().string();  // Get file extension
+
+                if (extension == ".tastate") {
+                    try {
+                        int seqno = std::stoi(filename);
+                        fileMap[seqno] = entry.path();
+                    } catch (const std::exception& e) {
+                        LOG(ERROR) << "Error reading seqno of trace assembler state " << entry.path().string();
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        return td::Status::Error(PSLICE() << "Error while searching for TraceAssembler states: " << e.what());
+    }
+
+    for (const auto& [state_seqno, path] : fileMap) {
+        LOG(INFO) << "Found TA state seqno:" << seqno << " - path: " << path.string() << '\n';
+        if (state_seqno > seqno) {
+            LOG(WARNING) << "Found trace assembler state " << state_seqno << " newer than requested " << seqno;
             continue;
         }
-        auto status = S.move_as_ok();
-        if (status == td::KeyValue::GetStatus::NotFound) {
-            state_seqno -= 1;
+        auto buffer_r = td::read_file(path.string());
+        if (buffer_r.is_error()) {
+            LOG(ERROR) << "Failed to read trace assembler state file " << path.string() << ": " << buffer_r.move_as_error();
             continue;
         }
+        auto buffer = buffer_r.move_as_ok();
 
         std::unordered_map<td::Bits256, TraceImplPtr, Bits256Hasher> pending_traces;
         std::unordered_map<td::Bits256, TraceEdgeImpl, Bits256Hasher> pending_edges;    
@@ -129,47 +177,18 @@ td::Result<ton::BlockSeqno> TraceAssembler::restore_state(ton::BlockSeqno seqno)
             pending_edges_obj.convert(pending_edges);
         } catch (const std::exception &e) {
             LOG(ERROR) << "Failed to unpack state for seqno " << state_seqno << ": " << e.what();
-            state_seqno -= 1;
             continue;
         }
         
         pending_traces_ = std::move(pending_traces);
         pending_edges_ = std::move(pending_edges);
-        found = true;
+
+        return state_seqno;
     }
 
-    if (!found) {
-        return td::Status::Error(ton::ErrorCode::warning, "TraceAssembler state not found");
-    }
-    
-    return state_seqno;
+    return td::Status::Error(ton::ErrorCode::warning, "TraceAssembler state not found");    
 }
 
-td::Status TraceAssembler::save_state(ton::BlockSeqno seqno) {
-    std::stringstream buffer;
-    msgpack::pack(buffer, pending_traces_);
-    msgpack::pack(buffer, pending_edges_);
- 
-    return kv_->set(std::to_string(seqno), buffer.str());
-}
-
-td::Status TraceAssembler::gc_states(ton::BlockSeqno before_seqno) {
-    std::string last_gcd_seqno_value;
-    auto res = kv_->get("last_gcd", last_gcd_seqno_value);
-    if (res.is_error() || res.ok() == td::KeyValueReader::GetStatus::NotFound) {
-        TRY_STATUS(kv_->set("last_gcd", std::to_string(before_seqno)));
-        return td::Status::OK();
-    }
-    ton::BlockSeqno last_gcd_seqno = std::stoul(last_gcd_seqno_value);
-    
-    TRY_STATUS(kv_->begin_write_batch());
-    for (auto c = last_gcd_seqno; c < before_seqno; c++) {
-        TRY_STATUS(kv_->erase(std::to_string(c)));
-    }
-    TRY_STATUS(kv_->set("last_gcd", std::to_string(before_seqno)));
-    TRY_STATUS(kv_->begin_write_batch());
-    return td::Status::OK();
-}
 
 void TraceAssembler::process_queue() {
     auto it = queue_.find(expected_seqno_);
@@ -179,11 +198,6 @@ void TraceAssembler::process_queue() {
 
         // block processed
         queue_.erase(it);
-
-        auto save_status = save_state(expected_seqno_);
-        if (save_status.is_error()) {
-            LOG(ERROR) << "Error while saving Trace Assembler state: " << save_status.move_as_error();
-        }
 
         expected_seqno_ += 1;
         it = queue_.find(expected_seqno_);

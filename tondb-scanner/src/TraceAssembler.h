@@ -1,8 +1,6 @@
 #pragma once
 #include "msgpack-utils.h"
 #include "IndexData.h"
-#include <queue>
-#include "tddb/td/db/KeyValue.h"
 
 
 struct Bits256Hasher {
@@ -85,7 +83,6 @@ class TraceAssembler: public td::actor::Actor {
     std::string db_path_;
     size_t gc_distance_;
     ton::BlockSeqno expected_seqno_{0};
-    std::unique_ptr<td::KeyValue> kv_;
     std::map<ton::BlockSeqno, Task> queue_;
     size_t broken_count_{0};
 
@@ -101,8 +98,6 @@ public:
     void start_up() override;
     void alarm() override;
 private:
-    td::Status save_state(ton::BlockSeqno seqno);
-    td::Status gc_states(ton::BlockSeqno before_seqno);
     void process_queue();
     void process_block(ton::BlockSeqno seqno, ParsedBlockPtr block);
     void process_transaction(ton::BlockSeqno seqno, schema::Transaction& tx, std::vector<TraceEdgeImpl>& edges_found_, 
