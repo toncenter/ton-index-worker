@@ -74,9 +74,9 @@ td::Status gc_states(std::string db_path, ton::BlockSeqno current_seqno, size_t 
             fs::remove(filepath);
         } else if (count >= keep_last) {
             fs::remove(filepath);
-            LOG(INFO) << "Deleting old state: " << filepath.string();
+            LOG(DEBUG) << "Deleting old state: " << filepath.string();
         } else {
-            LOG(INFO) << "Keeping state: " << filepath.string();
+            LOG(DEBUG) << "Keeping state: " << filepath.string();
             count++;
         }
     }
