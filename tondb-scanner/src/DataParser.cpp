@@ -138,6 +138,7 @@ td::Result<schema::CurrencyCollection> ParseQuery::parse_currency_collection(td:
     auto value_cs = it.cur_value();
     auto value = block::tlb::t_VarUInteger_32.as_integer(value_cs);
     extra_currencies[id] = value;
+    ++it;
   }
   return schema::CurrencyCollection{std::move(grams), std::move(extra_currencies)};
 }
