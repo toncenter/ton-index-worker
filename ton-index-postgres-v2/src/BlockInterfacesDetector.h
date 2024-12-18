@@ -5,7 +5,7 @@
 
 struct AccountStateHasher {
     std::size_t operator()(const schema::AccountState& account_state) const {
-        return BitArrayHasher()(account_state.hash);
+        return std::hash<td::Bits256>{}(account_state.hash);
     }
 };
 
@@ -13,7 +13,7 @@ class BlockInterfaceProcessor: public td::actor::Actor {
 private:
     ParsedBlockPtr block_;
     td::Promise<ParsedBlockPtr> promise_;
-    std::unordered_map<block::StdAddress, std::vector<BlockchainInterfaceV2>, AddressHasher> interfaces_{};
+    std::unordered_map<block::StdAddress, std::vector<BlockchainInterfaceV2>> interfaces_{};
 public:
     BlockInterfaceProcessor(ParsedBlockPtr block, td::Promise<ParsedBlockPtr> promise) : 
         block_(std::move(block)), promise_(std::move(promise)) {}
