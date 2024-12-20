@@ -97,6 +97,10 @@ td::Status save_state(std::string db_path, ton::BlockSeqno seqno,
 void TraceAssembler::alarm() {
     alarm_timestamp() = td::Timestamp::in(10.0);
 
+    if (expected_seqno_ == 0) {
+        return;
+    }
+
     ton::delay_action([this, seqno = expected_seqno_ - 1, pending_traces = pending_traces_, pending_edges = pending_edges_]() {
         auto S = save_state(this->db_path_, expected_seqno_ - 1, pending_traces_, pending_edges_);
         if (S.is_error()) {
