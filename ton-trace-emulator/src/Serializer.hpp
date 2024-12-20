@@ -23,7 +23,9 @@ namespace msgpack {
       msgpack::object const& operator()(msgpack::object const& o, block::StdAddress& v) const {
         if (o.type != msgpack::type::STR) throw msgpack::type_error();
         std::string addr = o.as<std::string>();
-        if (!v.parse_addr(addr)) throw std::runtime_error("Failed to deserialize block::StdAddress");
+        if (!v.parse_addr(addr)) {
+          throw std::runtime_error("Failed to deserialize block::StdAddress");
+        }
         return o;
       }
     };
