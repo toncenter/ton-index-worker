@@ -166,7 +166,9 @@ void EventProcessor::process_transactions(const std::vector<schema::Transaction>
     };
 
     auto cs = vm::load_cell_slice_ref(tx.in_msg.value().body);
-    switch (tokens::gen::t_InternalMsgBody.check_tag(*cs)) {
+    auto tag = tokens::gen::t_InternalMsgBody.check_tag(*cs);
+    LOG(ERROR) << "Event processor enter: " << tag;
+    switch (tag) {
       case tokens::gen::InternalMsgBody::transfer_jetton: 
         td::actor::send_closure(jetton_wallet_detector_, &JettonWalletDetector::parse_transfer, tx, cs, 
           td::PromiseCreator::lambda([process, promise = ig.get_promise()](td::Result<JettonTransfer> transfer) mutable { 
