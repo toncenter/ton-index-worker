@@ -54,6 +54,7 @@ public:
         } else if (tokens::gen::t_InternalMsgBody.check_tag(*in_msg_body_cs) == tokens::gen::InternalMsgBody::internal_transfer) {
             auto mint = parse_jetton_mint(*jetton_wallet_ptr, transaction, in_msg_body_cs);
             if (mint.is_error()) {
+                std::cout << "Failed to parse_jetton_mint" <<  mint.move_as_error().message().str() << std::endl;
                 LOG(DEBUG) << "Failed to parse jetton mint: " << mint.move_as_error();
             } else {
                 block_->events_.push_back(mint.move_as_ok());
@@ -165,6 +166,7 @@ public:
 
 
     td::Result<JettonMint> parse_jetton_mint(const JettonWalletDataV2& jetton_wallet, const schema::Transaction& transaction, td::Ref<vm::CellSlice> in_msg_body_cs) {
+        std::cout << "Enter to parse_jetton_mint" << std::endl;
         tokens::gen::InternalMsgBody::Record_internal_transfer internal_transfer_record;
         if (!tlb::csr_unpack_inexact(in_msg_body_cs, internal_transfer_record)) {
             return td::Status::Error("Failed to unpack internal_transfer");
