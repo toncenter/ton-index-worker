@@ -36,7 +36,6 @@ public:
     auto in_msg_body_cs = vm::load_cell_slice_ref(transaction.in_msg.value().body);
 
     for (auto& v : interfaces) {
-      LOG(ERROR) << "start to process interfaces";
       if (auto jetton_wallet_ptr = std::get_if<JettonWalletDataV2>(&v)) {
         if (tokens::gen::t_InternalMsgBody.check_tag(*in_msg_body_cs) == tokens::gen::InternalMsgBody::transfer_jetton) {
           auto transfer = parse_jetton_transfer(*jetton_wallet_ptr, transaction, in_msg_body_cs);
@@ -53,6 +52,7 @@ public:
             block_->events_.push_back(burn.move_as_ok());
           }
         } else if (tokens::gen::t_InternalMsgBody.check_tag(*in_msg_body_cs) == tokens::gen::InternalMsgBody::internal_transfer) {
+            LOG(ERROR) << "start to process internal_transfer: " << convert::to_raw_address((*jetton_wallet_ptr).address);
             auto mint = parse_jetton_mint(*jetton_wallet_ptr, transaction, in_msg_body_cs);
             if (mint.is_error()) {
                 LOG(ERROR) << "Failed to parse_jetton_mint" <<  mint.move_as_error();
