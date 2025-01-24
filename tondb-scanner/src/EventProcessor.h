@@ -37,6 +37,7 @@ public:
 
     for (auto& v : interfaces) {
       if (auto jetton_wallet_ptr = std::get_if<JettonWalletDataV2>(&v)) {
+          LOG(ERROR) << "Jetton wallet opcode: " << tokens::gen::t_InternalMsgBody.check_tag(*in_msg_body_cs) << " " << convert::to_raw_address((*jetton_wallet_ptr).address);
         if (tokens::gen::t_InternalMsgBody.check_tag(*in_msg_body_cs) == tokens::gen::InternalMsgBody::transfer_jetton) {
           auto transfer = parse_jetton_transfer(*jetton_wallet_ptr, transaction, in_msg_body_cs);
           if (transfer.is_error()) {
