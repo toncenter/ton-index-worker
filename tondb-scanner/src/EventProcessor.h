@@ -51,6 +51,13 @@ public:
           } else {
             block_->events_.push_back(burn.move_as_ok());
           }
+        } else if (tokens::gen::t_InternalMsgBody.check_tag(*in_msg_body_cs) == tokens::gen::InternalMsgBody::internal_transfer) {
+            auto mint = parse_jetton_mint(*jetton_wallet_ptr, transaction, in_msg_body_cs);
+            if (mint.is_error()) {
+                LOG(DEBUG) << "Failed to parse jetton mint: " << mint.move_as_error();
+            } else {
+                block_->events_.push_back(mint.move_as_ok());
+            }
         }
       }
 
@@ -156,6 +163,58 @@ public:
     return burn;
   }
 
+
+    td::Result<JettonMint> parse_jetton_mint(const JettonWalletDataV2& jetton_wallet, const schema::Transaction& transaction, td::Ref<vm::CellSlice> in_msg_body_cs) {
+        tokens::gen::InternalMsgBody::Record_internal_transfer internal_transfer_record;
+        if (!tlb::csr_unpack_inexact(in_msg_body_cs, internal_transfer_record)) {
+            return td::Status::Error("Failed to unpack internal_transfer");
+        }
+
+        JettonMint mint;
+        mint.trace_id = transaction.trace_id;
+        mint.transaction_hash = transaction.hash;
+        mint.transaction_lt = transaction.lt;
+        mint.transaction_now = transaction.now;
+        if (auto* v = std::get_if<schema::TransactionDescr_ord>(&transaction.description)) {
+            mint.transaction_aborted = v->aborted;
+        } else {
+            return td::Status::Error("Unexpected transaction description");
+        }
+
+        mint.query_id = internal_transfer_record.query_id;
+        if (!transaction.in_msg || !transaction.in_msg->source) {
+            return td::Status::Error("Failed to unpack burn source");
+        }
+
+        mint.amount = block::tlb::t_VarUInteger_16.as_integer(internal_transfer_record.amount);
+        if (mint.amount.is_null()) {
+            return td::Status::Error("Failed to unpack burn amount");
+        }
+
+        // never delete this!
+        auto initiator_address = transaction.in_msg->source.value();
+        auto master_address = convert::to_raw_address(jetton_wallet.jetton);
+        if(initiator_address != master_address) {
+            return td::Status::Error("internal_transfer is not mint message");
+        }
+
+        mint.owner = convert::to_raw_address(jetton_wallet.owner);
+        mint.jetton_wallet = convert::to_raw_address(transaction.account);
+        mint.jetton_master = convert::to_raw_address(jetton_wallet.jetton);
+
+        auto response_destination = convert::to_raw_address(internal_transfer_record.response_address);
+        if (response_destination.is_error()) {
+            return response_destination.move_as_error_prefix("Failed to unpack mint response address: ");
+        }
+        mint.response_destination = response_destination.move_as_ok();
+
+        mint.forward_ton_amount = block::tlb::t_VarUInteger_16.as_integer(internal_transfer_record.forward_ton_amount);
+        if (!internal_transfer_record.forward_payload.write().fetch_maybe_ref(mint.forward_payload)) {
+            return td::Status::Error("Failed to fetch forward payload");
+        }
+        return mint;
+    }
+
   td::Result<NFTTransfer> parse_nft_transfer(const NFTItemDataV2& nft_item, const schema::Transaction& transaction, td::Ref<vm::CellSlice> in_msg_body_cs) {
     tokens::gen::InternalMsgBody::Record_transfer_nft transfer_record;
     if (!tlb::csr_unpack_inexact(in_msg_body_cs, transfer_record)) {
@@ -205,6 +264,7 @@ public:
   }
 };
 
+// todo implement mint event for postgres-v1 & clickhouse
 class EventProcessor: public td::actor::Actor {
 private:
   td::actor::ActorOwn<InterfaceManager> interface_manager_;
