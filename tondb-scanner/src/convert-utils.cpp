@@ -64,6 +64,17 @@ td::Result<block::StdAddress> convert::to_std_address(td::Ref<vm::CellSlice> cs)
           if (!tlb::csr_unpack(cs, addr)) {
             return td::Status::Error("Failed to unpack addr_std");
           }
+          if (addr.anycast.not_null()) {
+            if (addr.anycast->bit_at(0) == 1) {
+              auto anycast_slice = vm::CellSlice(*addr.anycast);
+              anycast_slice.advance(1); // skip maybe bit
+              block::gen::Anycast::Record anycast;
+              if (!tlb::unpack_exact(anycast_slice, anycast)) {
+                return td::Status::Error("Failed to unpack Anycast");
+              }
+              td::bitstring::bits_memcpy(addr.address.bits().ptr, 0, anycast.rewrite_pfx->bits().ptr, 0, anycast.depth);
+            }
+          }
           return block::StdAddress(addr.workchain_id, addr.address);
         }
         default:
