@@ -401,9 +401,12 @@ void InsertBatchPostgres::alarm() {
     insert_transactions(txn, with_copy_);
     insert_messages(txn, with_copy_);
     insert_account_states(txn, with_copy_);
+
     insert_jetton_transfers(txn, with_copy_);
     insert_jetton_burns(txn, with_copy_);
     insert_jetton_mints(txn, with_copy_);
+    insert_jetton_latest_state(txn, with_copy_);
+
     insert_nft_transfers(txn, with_copy_);
     insert_traces(txn, with_copy_);
     std::string insert_under_mutex_query;
@@ -1434,6 +1437,43 @@ void InsertBatchPostgres::insert_jetton_mints(pqxx::work &txn, bool with_copy) {
     stream.finish();
 }
 
+template <class T>
+std::pair<uint32_t, uint64_t> get_greatest(std::pair<uint32_t, uint64_t> current, std::vector<T> events) {
+    for (const auto& e : events) {
+        if (e.transaction_now > current.first ||
+                (e.transaction_now == current.first && e.transaction_lt > current.second))
+        {
+            current = std::make_pair(e.transaction_now, e.transaction_lt);
+        }
+    }
+    return current;
+}
+
+void InsertBatchPostgres::insert_jetton_latest_state(pqxx::work &txn, bool with_copy) {
+    std::initializer_list<std::string_view> columns = {
+            "state_name", "tx_lt", "tx_now"
+    };
+    PopulateTableStream stream(txn, "last_known_state", columns, 1000, with_copy);
+    stream.setConflictDoUpdate({"state_name"},
+                               "last_known_state.tx_now < EXCLUDED.tx_now OR (last_known_state.tx_now = EXCLUDED.tx_now AND last_known_state.tx_lt < EXCLUDED.tx_lt)");
+
+    std::pair<uint32_t, uint64_t> latest_tx = std::make_pair(0, 0);
+    for (const auto& task : insert_tasks_) {
+        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonMint>());
+        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonBurn>());
+        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonTransfer>());
+    }
+
+    stream.insert_row(
+        std::make_tuple(
+            "jetton_events",
+            latest_tx.second,
+            latest_tx.first
+        )
+    );
+    stream.finish();
+}
+
 void InsertBatchPostgres::insert_nft_transfers(pqxx::work &txn, bool with_copy) {
   std::initializer_list<std::string_view> columns = {
     "tx_hash", "tx_lt", "tx_now", "tx_aborted", "query_id", "nft_item_address", "nft_item_index", "nft_collection_address",
@@ -1898,6 +1938,13 @@ void InsertManagerPostgres::start_up() {
               "trace_id tonhash, "
               "primary key (tx_hash, tx_lt), "
               "foreign key (tx_hash, tx_lt) references transactions);\n"
+      );
+
+      query += (
+              "create table if not exists last_known_state ( "
+              "state_name varchar(30) not null primary key, "
+              "tx_lt bigint not null, "
+              "tx_now integer not null);\n"
       );
 
       query += (
