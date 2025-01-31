@@ -1450,28 +1450,28 @@ std::pair<uint32_t, uint64_t> get_greatest(std::pair<uint32_t, uint64_t> current
 }
 
 void InsertBatchPostgres::insert_jetton_latest_state(pqxx::work &txn, bool with_copy) {
-    std::initializer_list<std::string_view> columns = {
-            "state_name", "tx_lt", "tx_now"
-    };
-    PopulateTableStream stream(txn, "last_known_state", columns, 1000, false);
-    stream.setConflictDoUpdate({"state_name"},
-                               "last_known_state.tx_now < EXCLUDED.tx_now OR (last_known_state.tx_now = EXCLUDED.tx_now AND last_known_state.tx_lt < EXCLUDED.tx_lt)");
-
-    std::pair<uint32_t, uint64_t> latest_tx = std::make_pair(0, 0);
-    for (const auto& task : insert_tasks_) {
-        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonMint>());
-        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonBurn>());
-        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonTransfer>());
-    }
-
-    stream.insert_row(
-        std::make_tuple(
-            "jetton_events",
-            latest_tx.second,
-            latest_tx.first
-        )
-    );
-    stream.finish();
+//    std::initializer_list<std::string_view> columns = {
+//            "state_name", "tx_lt", "tx_now"
+//    };
+//    PopulateTableStream stream(txn, "last_known_state", columns, 1000, false);
+//    stream.setConflictDoUpdate({"state_name"},
+//                               "last_known_state.tx_now < EXCLUDED.tx_now OR (last_known_state.tx_now = EXCLUDED.tx_now AND last_known_state.tx_lt < EXCLUDED.tx_lt)");
+//
+//    std::pair<uint32_t, uint64_t> latest_tx = std::make_pair(0, 0);
+//    for (const auto& task : insert_tasks_) {
+//        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonMint>());
+//        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonBurn>());
+//        latest_tx = get_greatest(latest_tx, task.parsed_block_->get_events<JettonTransfer>());
+//    }
+//
+//    stream.insert_row(
+//        std::make_tuple(
+//            "jetton_events",
+//            latest_tx.second,
+//            latest_tx.first
+//        )
+//    );
+//    stream.finish();
 }
 
 void InsertBatchPostgres::insert_nft_transfers(pqxx::work &txn, bool with_copy) {
