@@ -30,7 +30,7 @@ td::Result<std::string> convert::to_raw_address(td::Ref<vm::CellSlice> cs) {
               if (!tlb::unpack_exact(anycast_slice, anycast)) {
                 return td::Status::Error("Failed to unpack Anycast");
               }
-              td::bitstring::bits_memcpy(addr.address.bits().ptr, 0, anycast.rewrite_pfx->bits().ptr, 0, anycast.depth);
+              addr.address.bits().copy_from(anycast.rewrite_pfx->cbits(), anycast.depth);
             }
           }
           return std::to_string(addr.workchain_id) + ":" + addr.address.to_hex();
@@ -72,7 +72,7 @@ td::Result<block::StdAddress> convert::to_std_address(td::Ref<vm::CellSlice> cs)
               if (!tlb::unpack_exact(anycast_slice, anycast)) {
                 return td::Status::Error("Failed to unpack Anycast");
               }
-              td::bitstring::bits_memcpy(addr.address.bits().ptr, 0, anycast.rewrite_pfx->bits().ptr, 0, anycast.depth);
+              addr.address.bits().copy_from(anycast.rewrite_pfx->cbits(), anycast.depth);
             }
           }
           return block::StdAddress(addr.workchain_id, addr.address);
