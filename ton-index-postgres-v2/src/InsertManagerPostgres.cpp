@@ -1453,7 +1453,7 @@ void InsertBatchPostgres::insert_jetton_latest_state(pqxx::work &txn, bool with_
     std::initializer_list<std::string_view> columns = {
             "state_name", "tx_lt", "tx_now"
     };
-    PopulateTableStream stream(txn, "last_known_state", columns, 1000, with_copy);
+    PopulateTableStream stream(txn, "last_known_state", columns, 1000, false);
     stream.setConflictDoUpdate({"state_name"},
                                "last_known_state.tx_now < EXCLUDED.tx_now OR (last_known_state.tx_now = EXCLUDED.tx_now AND last_known_state.tx_lt < EXCLUDED.tx_lt)");
 
