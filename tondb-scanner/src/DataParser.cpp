@@ -8,11 +8,16 @@
 #include "validator/interfaces/block.h"
 #include "validator/interfaces/shard.h"
 #include "convert-utils.h"
+#include "Statistics.h"
 
 using namespace ton::validator; //TODO: remove this
 
 void ParseQuery::start_up() {
+  td::Timer timer;
   auto status = parse_impl();
+  timer.pause();
+  g_statistics.record_time("parse_query", timer.elapsed() * 1e3);
+  
   if(status.is_error()) {
     promise_.set_error(status.move_as_error());
   }

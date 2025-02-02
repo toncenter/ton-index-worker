@@ -3,6 +3,8 @@
 #include "td/utils/StringBuilder.h"
 #include <iostream>
 #include "BlockInterfacesDetector.h"
+#include "Statistics.h"
+#include "td/utils/filesystem.h"
 
 
 void IndexScheduler::start_up() {
@@ -44,6 +46,15 @@ void IndexScheduler::alarm() {
     if (next_print_stats_.is_in_past()) {
         print_stats();
         next_print_stats_ = td::Timestamp::in(stats_timeout_);
+    }
+    if (next_statistics_flush_.is_in_past()) {
+        auto stats = g_statistics.generate_report_and_reset();
+        auto path = working_dir_ + "/" + "statistics.txt";
+        auto status = td::atomic_write_file(path, std::move(stats));
+        if (status.is_error()) {
+            LOG(ERROR) << "Failed to write statistics to " << path << ": " << status.error();
+        }
+        next_statistics_flush_ = td::Timestamp::in(60.0);
     }
 
     auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueState> R){
