@@ -13,7 +13,7 @@ add_library(tondb-scanner STATIC
     src/convert-utils.cpp
     src/tokens.cpp
     src/Statistics.cpp
-    src/smc-interfaces/Tokens.cpp
+    src/smc-interfaces/TokensParsed.cpp
     src/smc-interfaces/NftSale.cpp
     src/smc-interfaces/execute-smc.cpp
 )
