@@ -2,34 +2,28 @@
 #include <td/actor/MultiPromise.h>
 #include <block/block.h>
 #include "IndexData.h"
-
-struct AccountStateHasher {
-    std::size_t operator()(const schema::AccountState& account_state) const {
-        return BitArrayHasher()(account_state.hash);
-    }
-};
+#include "Statistics.h"
 
 class BlockInterfaceProcessor: public td::actor::Actor {
 private:
     ParsedBlockPtr block_;
     td::Promise<ParsedBlockPtr> promise_;
     std::unordered_map<block::StdAddress, std::vector<BlockchainInterfaceV2>, AddressHasher> interfaces_{};
+    td::Timer timer_{true};
 public:
     BlockInterfaceProcessor(ParsedBlockPtr block, td::Promise<ParsedBlockPtr> promise) : 
         block_(std::move(block)), promise_(std::move(promise)) {}
 
     void start_up() override {
-        std::unordered_set<schema::AccountState, AccountStateHasher> account_states_to_detect;
+        timer_.resume();
+        std::unordered_map<block::StdAddress, schema::AccountState, AddressHasher> account_states_to_detect;
         for (const auto& account_state : block_->account_states_) {
             if (!account_state.code_hash || !account_state.data_hash) {
                 continue;
             }
-            auto existing = account_states_to_detect.find(account_state);
-            if (existing != account_states_to_detect.end() && account_state.last_trans_lt > existing->last_trans_lt) {
-                account_states_to_detect.erase(existing);
-                account_states_to_detect.insert(account_state);
-            } else {
-                account_states_to_detect.insert(account_state);
+            auto existing = account_states_to_detect.find(account_state.account);
+            if (existing == account_states_to_detect.end() || account_state.last_trans_lt > existing->second.last_trans_lt) {
+                account_states_to_detect[account_state.account] = account_state;
                 interfaces_[account_state.account] = {};
             }
         }
@@ -47,7 +41,7 @@ public:
         auto ig = mp.init_guard();
         ig.add_promise(std::move(P));
 
-        for (const auto& account_state : account_states_to_detect) {
+        for (const auto& [_, account_state] : account_states_to_detect) {
             if (account_state.code.is_null()) {
                 continue;
             }
@@ -112,6 +106,9 @@ public:
                     nft_item_data.last_transaction_now = last_trans_now;
                     nft_item_data.code_hash = code_hash;
                     nft_item_data.data_hash = data_hash;
+                    if (arg.dns_entry) {
+                        nft_item_data.dns_entry = NFTItemDataV2::DNSEntry{arg.dns_entry->domain, arg.dns_entry->wallet, arg.dns_entry->next_resolver, arg.dns_entry->site_adnl};
+                    }
                     interfaces_[address].push_back(nft_item_data);
                 } else if constexpr (std::is_same_v<T, GetGemsNftAuction::Result>) {
                     GetGemsNftAuctionData auction_data;
@@ -171,6 +168,7 @@ public:
             block_->account_interfaces_ = std::move(interfaces_);
             promise_.set_result(std::move(block_));
         }
+        g_statistics.record_time(DETECT_INTERFACES_SEQNO, timer_.elapsed() * 1e3);
         stop();
     }
 };

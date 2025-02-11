@@ -3,10 +3,13 @@
 #include "td/utils/StringBuilder.h"
 #include <iostream>
 #include "BlockInterfacesDetector.h"
+#include "Statistics.h"
+#include "td/utils/filesystem.h"
+#include "common/delay.h"
 
 
 void IndexScheduler::start_up() {
-    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler", from_seqno_);
+    trace_assembler_ = td::actor::create_actor<TraceAssembler>("trace_assembler", working_dir_ + "/trace_assembler", max_queue_.mc_blocks_);
 }
 
 std::string get_time_string(double seconds) {
@@ -45,6 +48,18 @@ void IndexScheduler::alarm() {
         print_stats();
         next_print_stats_ = td::Timestamp::in(stats_timeout_);
     }
+    if (next_statistics_flush_.is_in_past()) {
+        ton::delay_action([working_dir = this->working_dir_]() {
+            auto stats = g_statistics.generate_report_and_reset();
+            auto path = working_dir + "/" + "stats.txt";
+            auto status = td::atomic_write_file(path, std::move(stats));
+            if (status.is_error()) {
+                LOG(ERROR) << "Failed to write statistics to " << path << ": " << status.error();
+            }
+        }, td::Timestamp::now());
+        
+        next_statistics_flush_ = td::Timestamp::in(60.0);
+    }
 
     auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<QueueState> R){
         R.ensure();
@@ -67,16 +82,6 @@ void IndexScheduler::run() {
         td::actor::send_closure(SelfId, &IndexScheduler::got_existing_seqnos, std::move(R));
     });
     td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_existing_seqnos, std::move(P), from_seqno_, to_seqno_);
-
-    // restore TraceAssembler state
-    auto Q = td::PromiseCreator::lambda([trace_assembler = trace_assembler_.get()](td::Result<schema::TraceAssemblerState> R) {
-        if (R.is_error()) {
-            LOG(ERROR) << "Failed to read TraceAssemblerState from database: " << R.move_as_error();
-            std::_Exit(2);
-        }
-        td::actor::send_closure(trace_assembler, &TraceAssembler::restore_trace_assembler_state, R.move_as_ok());
-    });
-    td::actor::send_closure(insert_manager_, &InsertManagerInterface::get_trace_assembler_state, std::move(Q));
 }
 
 void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> R) {
@@ -85,39 +90,68 @@ void IndexScheduler::got_existing_seqnos(td::Result<std::vector<std::uint32_t>> 
         return;
     }
 
-    std::vector<std::uint32_t> seqnos_{R.move_as_ok()};
-    if (seqnos_.size()) {
-        std::sort(seqnos_.begin(), seqnos_.end());
-        std::int32_t next_seqno = seqnos_[0];
-        for (auto value : seqnos_) {
+    ton::BlockSeqno next_seqno = from_seqno_;
+    auto existing_db_seqnos = R.move_as_ok();
+    if (existing_db_seqnos.size()) {
+        std::sort(existing_db_seqnos.begin(), existing_db_seqnos.end());
+        next_seqno = existing_db_seqnos[0];
+        for (auto value : existing_db_seqnos) {
             if (value == next_seqno) {
                 ++next_seqno;
-                existing_seqnos_.insert(value);
             } else {
                 break;
             }
         }
-        LOG(INFO) << "Accepted " << existing_seqnos_.size() << " of " << seqnos_.size() 
-                  << " existing seqnos. Next seqno: " << next_seqno;
-        td::actor::send_closure(trace_assembler_, &TraceAssembler::update_expected_seqno, next_seqno);
+        size_t accepted_cnt = next_seqno - from_seqno_;
+        LOG(INFO) << "Accepted " << accepted_cnt << " of " << existing_db_seqnos.size() 
+                  << " existing seqnos in DB (continuous increasing sequence)";
+        LOG(INFO) << "Next seqno: " << next_seqno;
     }
-    alarm_timestamp() = td::Timestamp::in(1.0);
+
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), from_seqno = from_seqno_, next_seqno](td::Result<ton::BlockSeqno> R) mutable {
+        if (R.is_error()) {
+            LOG(WARNING) << "TraceAssembler state not found for seqno " << next_seqno - 1;
+            if (next_seqno > from_seqno) {
+                // to make sure we don't miss any traces (we assume no trace lasts for longer than 50 mc blocks)
+                auto to_start_from = std::max(from_seqno, static_cast<int32_t>(next_seqno) - 50); 
+                next_seqno = static_cast<ton::BlockSeqno>(to_start_from);
+            }
+            LOG(WARNING) << "Traces that started before block " << next_seqno << " and will be marked as broken and not inserted.";
+            td::actor::send_closure(SelfId, &IndexScheduler::got_trace_assembler_last_state_seqno, next_seqno - 1);
+        } else {
+            LOG(INFO) << "Restored TraceAssembler state for seqno " << R.ok();
+            td::actor::send_closure(SelfId, &IndexScheduler::got_trace_assembler_last_state_seqno, R.move_as_ok());
+        }
+    });
+
+    td::actor::send_closure(trace_assembler_, &TraceAssembler::restore_state, next_seqno - 1, std::move(P));
+}
+
+void IndexScheduler::got_trace_assembler_last_state_seqno(ton::BlockSeqno last_state_seqno) {
+    for (auto seqno = from_seqno_; seqno <= last_state_seqno; ++seqno) {
+        existing_seqnos_.insert(seqno);
+    }
+
+    LOG(INFO) << "Starting indexing from seqno: " << last_state_seqno + 1;
+
+    td::actor::send_closure(trace_assembler_, &TraceAssembler::set_expected_seqno, last_state_seqno + 1);
+    alarm_timestamp() = td::Timestamp::now();
 }
 
 void IndexScheduler::got_last_known_seqno(std::uint32_t last_known_seqno) {
     if (to_seqno_ > 0 && last_known_seqno_ > to_seqno_) 
         return;
-    int skipped_count_ = 0;
-    for(auto seqno = last_known_seqno_ + 1; seqno <= last_known_seqno; ++seqno) {
+    int skipped_count = 0;
+    for (auto seqno = last_known_seqno_ + 1; seqno <= last_known_seqno; ++seqno) {
         if (!force_index_ && (existing_seqnos_.find(seqno) != existing_seqnos_.end())) {
-            ++skipped_count_;
+            ++skipped_count;
         }
         else if ((from_seqno_ <= 0 || seqno >= from_seqno_) && (to_seqno_ <= 0 || seqno <= to_seqno_)) {
             queued_seqnos_.push(seqno);
         }
     }
-    if (skipped_count_ > 0) {
-        LOG(INFO) << "Skipped " << skipped_count_ << " existing seqnos";
+    if (skipped_count > 0) {
+        LOG(INFO) << "Skipped " << skipped_count << " existing seqnos";
     }
     last_known_seqno_ = last_known_seqno;
 }
@@ -126,6 +160,7 @@ void IndexScheduler::schedule_seqno(std::uint32_t mc_seqno) {
     LOG(DEBUG) << "Scheduled seqno " << mc_seqno;
 
     processing_seqnos_.insert(mc_seqno);
+    timers_[mc_seqno] = td::Timer();
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<MasterchainBlockDataState> R) {
         if (R.is_error()) {
             LOG(ERROR) << "Failed to fetch seqno " << mc_seqno << ": " << R.move_as_error();
@@ -155,7 +190,12 @@ void IndexScheduler::seqno_fetched(std::uint32_t mc_seqno, MasterchainBlockDataS
         }
         td::actor::send_closure(SelfId, &IndexScheduler::seqno_parsed, mc_seqno, R.move_as_ok());
     });
-    td::actor::send_closure(parse_manager_, &ParseManager::parse, mc_seqno, std::move(block_data_state), std::move(P));
+
+    td::actor::send_closure(db_scanner_, &DbScanner::get_cell_db_reader, 
+        [SelfId = actor_id(this), parse_manager = parse_manager_, mc_seqno, block_data_state, P = std::move(P)](td::Result<std::shared_ptr<vm::CellDbReader>> cell_db_reader) mutable {
+            CHECK(cell_db_reader.is_ok());
+            td::actor::send_closure(parse_manager, &ParseManager::parse, mc_seqno, std::move(block_data_state), cell_db_reader.move_as_ok(), std::move(P));
+    });
 }
 
 void IndexScheduler::seqno_parsed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
@@ -173,7 +213,7 @@ void IndexScheduler::seqno_parsed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_
 }
 
 void IndexScheduler::seqno_traces_assembled(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
-    LOG(DEBUG) << "Assebled traces for seqno " << mc_seqno;
+    LOG(DEBUG) << "Assembled traces for seqno " << mc_seqno;
 
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<ParsedBlockPtr> R) {
         if (R.is_error()) {
@@ -187,6 +227,8 @@ void IndexScheduler::seqno_traces_assembled(std::uint32_t mc_seqno, ParsedBlockP
 }
 
 void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
+    LOG(DEBUG) << "Interfaces processed for seqno " << mc_seqno;
+
     auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<ParsedBlockPtr> R) {
         if (R.is_error()) {
             LOG(ERROR) << "Failed to detect actions for seqno " << mc_seqno << ": " << R.move_as_error();
@@ -201,12 +243,13 @@ void IndexScheduler::seqno_interfaces_processed(std::uint32_t mc_seqno, ParsedBl
 void IndexScheduler::seqno_actions_processed(std::uint32_t mc_seqno, ParsedBlockPtr parsed_block) {
     LOG(DEBUG) << "Actions processed for seqno " << mc_seqno;
 
-    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<td::Unit> R) {
+    auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno, timer = td::Timer{}](td::Result<td::Unit> R) {
         if (R.is_error()) {
             LOG(ERROR) << "Failed to insert seqno " << mc_seqno << ": " << R.move_as_error();
             td::actor::send_closure(SelfId, &IndexScheduler::reschedule_seqno, mc_seqno);
             return;
         }
+        g_statistics.record_time(INSERT_SEQNO, timer.elapsed() * 1e3);
         td::actor::send_closure(SelfId, &IndexScheduler::seqno_inserted, mc_seqno, R.move_as_ok());
     });
     auto Q = td::PromiseCreator::lambda([SelfId = actor_id(this), mc_seqno](td::Result<QueueState> R){
@@ -255,6 +298,8 @@ void IndexScheduler::seqno_inserted(std::uint32_t mc_seqno, td::Unit result) {
     if (mc_seqno > last_indexed_seqno_) {
         last_indexed_seqno_ = mc_seqno;
     }
+    g_statistics.record_time(PROCESS_SEQNO, timers_[mc_seqno].elapsed() * 1e3);
+    timers_.erase(mc_seqno);
 }
 
 void IndexScheduler::schedule_next_seqnos() {

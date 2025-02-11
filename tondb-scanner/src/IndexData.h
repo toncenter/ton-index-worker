@@ -11,7 +11,10 @@
 
 namespace schema {
 
-struct Message;
+struct CurrencyCollection {
+  td::RefInt256 grams;
+  std::map<uint32_t, td::RefInt256> extra_currencies;
+};
 
 enum AccountStatus {
   uninit = block::gen::AccountStatus::acc_state_uninit,
@@ -27,14 +30,14 @@ enum AccStatusChange {
 };
 
 struct TrStoragePhase {
-  uint64_t storage_fees_collected;
-  std::optional<uint64_t> storage_fees_due;
+  td::RefInt256 storage_fees_collected;
+  std::optional<td::RefInt256> storage_fees_due;
   AccStatusChange status_change;
 };
 
 struct TrCreditPhase {
-  std::optional<uint64_t> due_fees_collected;
-  uint64_t credit;
+  std::optional<td::RefInt256> due_fees_collected;
+  CurrencyCollection credit;
 };
 
 enum ComputeSkipReason {
@@ -52,7 +55,7 @@ struct TrComputePhase_vm {
   bool success;
   bool msg_state_used;
   bool account_activated;
-  uint64_t gas_fees;
+  td::RefInt256 gas_fees;
   uint64_t gas_used;
   uint64_t gas_limit;
   std::optional<uint64_t> gas_credit;
@@ -77,8 +80,8 @@ struct TrActionPhase {
   bool valid;
   bool no_funds;
   AccStatusChange status_change;
-  std::optional<uint64_t> total_fwd_fees;
-  std::optional<uint64_t> total_action_fees;
+  std::optional<td::RefInt256> total_fwd_fees;
+  std::optional<td::RefInt256> total_action_fees;
   int32_t result_code;
   std::optional<int32_t> result_arg;
   uint16_t tot_actions;
@@ -94,13 +97,13 @@ struct TrBouncePhase_negfunds {
 
 struct TrBouncePhase_nofunds {
   StorageUsedShort msg_size;
-  uint64_t req_fwd_fees;
+  td::RefInt256 req_fwd_fees;
 };
 
 struct TrBouncePhase_ok {
   StorageUsedShort msg_size;
-  uint64_t msg_fees;
-  uint64_t fwd_fees;
+  td::RefInt256 msg_fees;
+  td::RefInt256 fwd_fees;
 };
 
 using TrBouncePhase = std::variant<TrBouncePhase_negfunds, 
@@ -116,8 +119,8 @@ struct SplitMergeInfo {
 
 struct TransactionDescr_ord {
   bool credit_first;
-  TrStoragePhase storage_ph;
-  TrCreditPhase credit_ph;
+  std::optional<TrStoragePhase> storage_ph;
+  std::optional<TrCreditPhase> credit_ph;
   TrComputePhase compute_ph;
   std::optional<TrActionPhase> action;
   bool aborted;
@@ -180,24 +183,24 @@ using TransactionDescr = std::variant<TransactionDescr_ord,
 
 struct Message {
   td::Bits256 hash;
-  td::optional<std::string> source;
-  td::optional<std::string> destination;
-  td::optional<uint64_t> value;
-  td::optional<uint64_t> fwd_fee;
-  td::optional<uint64_t> ihr_fee;
-  td::optional<uint64_t> created_lt;
-  td::optional<uint32_t> created_at;
-  td::optional<int32_t> opcode;
-  td::optional<bool> ihr_disabled;
-  td::optional<bool> bounce;
-  td::optional<bool> bounced;
-  td::optional<uint64_t> import_fee;
+  std::optional<std::string> source;
+  std::optional<std::string> destination;
+  std::optional<CurrencyCollection> value;
+  std::optional<td::RefInt256> fwd_fee;
+  std::optional<td::RefInt256> ihr_fee;
+  std::optional<uint64_t> created_lt;
+  std::optional<uint32_t> created_at;
+  std::optional<int32_t> opcode;
+  std::optional<bool> ihr_disabled;
+  std::optional<bool> bounce;
+  std::optional<bool> bounced;
+  std::optional<td::RefInt256> import_fee;
 
   td::Ref<vm::Cell> body;
   std::string body_boc;
 
   td::Ref<vm::Cell> init_state;
-  td::optional<std::string> init_state_boc;
+  std::optional<std::string> init_state_boc;
 
   td::Bits256 trace_id;
 };
@@ -216,7 +219,7 @@ struct Transaction {
   std::optional<Message> in_msg;
   std::vector<Message> out_msgs;
 
-  uint64_t total_fees;
+  CurrencyCollection total_fees;
 
   td::Bits256 account_state_hash_before;
   td::Bits256 account_state_hash_after;
@@ -238,9 +241,9 @@ struct Block {
   std::string root_hash;
   std::string file_hash;
 
-  td::optional<int32_t> mc_block_workchain;
-  td::optional<int64_t> mc_block_shard;
-  td::optional<uint32_t> mc_block_seqno;
+  std::optional<int32_t> mc_block_workchain;
+  std::optional<int64_t> mc_block_shard;
+  std::optional<uint32_t> mc_block_seqno;
   
   int32_t global_id;
   int32_t version;
@@ -260,7 +263,7 @@ struct Block {
   int32_t min_ref_mc_seqno;
   int32_t prev_key_block_seqno;
   int32_t vert_seqno;
-  td::optional<int32_t> master_ref_seqno;
+  std::optional<int32_t> master_ref_seqno;
   std::string rand_seed;
   std::string created_by;
 
@@ -283,7 +286,7 @@ struct AccountState {
   block::StdAddress account;
   std::string account_friendly;  // TODO: add account friendly
   uint32_t timestamp;
-  uint64_t balance;
+  CurrencyCollection balance;
   std::string account_status; // "uninit", "frozen", "active", "nonexist"
   std::optional<td::Bits256> frozen_hash;
   td::Ref<vm::Cell> code;
@@ -356,8 +359,8 @@ struct JettonMasterData {
   std::string address;
   td::RefInt256 total_supply;
   bool mintable;
-  td::optional<std::string> admin_address;
-  td::optional<std::map<std::string, std::string>> jetton_content;
+  std::optional<std::string> admin_address;
+  std::optional<std::map<std::string, std::string>> jetton_content;
   vm::CellHash jetton_wallet_code_hash;
   vm::CellHash data_hash;
   vm::CellHash code_hash;
@@ -439,8 +442,8 @@ struct JettonBurn {
 struct NFTCollectionData {
   std::string address;
   td::RefInt256 next_item_index;
-  td::optional<std::string> owner_address;
-  td::optional<std::map<std::string, std::string>> collection_content;
+  std::optional<std::string> owner_address;
+  std::optional<std::map<std::string, std::string>> collection_content;
   vm::CellHash data_hash;
   vm::CellHash code_hash;
   uint64_t last_transaction_lt;
@@ -466,7 +469,7 @@ struct NFTItemData {
   td::RefInt256 index;
   std::string collection_address;
   std::string owner_address;
-  td::optional<std::map<std::string, std::string>> content;
+  std::optional<std::map<std::string, std::string>> content;
   uint64_t last_transaction_lt;
   uint32_t last_transaction_now;
   vm::CellHash code_hash;
@@ -474,6 +477,14 @@ struct NFTItemData {
 };
 
 struct NFTItemDataV2 {
+  struct DNSEntry {
+    std::string domain;
+    std::optional<block::StdAddress> wallet;
+    std::optional<block::StdAddress> next_resolver;
+    std::optional<td::Bits256> site_adnl;
+    std::optional<td::Bits256> storage_bag_id;
+  };
+
   block::StdAddress address;
   bool init;
   td::RefInt256 index;
@@ -484,6 +495,7 @@ struct NFTItemDataV2 {
   uint32_t last_transaction_now;
   td::Bits256 code_hash;
   td::Bits256 data_hash;
+  std::optional<DNSEntry> dns_entry;
 };
 
 struct NFTTransfer {

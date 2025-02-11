@@ -8,11 +8,15 @@
 #include "validator/interfaces/block.h"
 #include "validator/interfaces/shard.h"
 #include "convert-utils.h"
+#include "Statistics.h"
 
 using namespace ton::validator; //TODO: remove this
 
 void ParseQuery::start_up() {
+  td::Timer timer;
   auto status = parse_impl();
+  g_statistics.record_time(PARSE_SEQNO, timer.elapsed() * 1e3);
+  
   if(status.is_error()) {
     promise_.set_error(status.move_as_error());
   }
@@ -25,6 +29,7 @@ void ParseQuery::start_up() {
 td::Status ParseQuery::parse_impl() {
   td::optional<schema::Block> mc_block;
   for (auto &block_ds : mc_block_.shard_blocks_diff_) {
+    td::Timer timer;
     // common block info
     block::gen::Block::Record blk;
     block::gen::BlockInfo::Record info;
@@ -40,36 +45,46 @@ td::Status ParseQuery::parse_impl() {
     }
 
     // transactions and messages
-    std::set<td::Bits256> addresses;
-    TRY_RESULT_ASSIGN(schema_block.transactions, parse_transactions(block_ds.block_data->block_id(), blk, info, extra, addresses));
+    td::Timer transactions_timer;
+    std::map<td::Bits256, AccountStateShort> account_states_to_get;
+    TRY_RESULT_ASSIGN(schema_block.transactions, parse_transactions(block_ds.block_data->block_id(), blk, info, extra, account_states_to_get));
+    g_statistics.record_time(PARSE_TRANSACTION, transactions_timer.elapsed() * 1e6, schema_block.transactions.size());
 
-    // account states
-    TRY_STATUS(parse_account_states(block_ds.block_state, addresses));
+    td::Timer acc_states_timer;
+    TRY_RESULT(account_states_fast, parse_account_states_new(schema_block.workchain, schema_block.gen_utime, account_states_to_get));
+    g_statistics.record_time(PARSE_ACCOUNT_STATE, acc_states_timer.elapsed() * 1e6, account_states_fast.size());
+    
+    for (auto &acc : account_states_fast) {
+      result->account_states_.push_back(std::move(acc));
+    }
 
     // config
     if (block_ds.block_data->block_id().is_masterchain()) {
+      td::Timer config_timer;
       TRY_RESULT_ASSIGN(mc_block_.config_, block::ConfigInfo::extract_config(block_ds.block_state, block::ConfigInfo::needCapabilities | block::ConfigInfo::needLibraries));
+      g_statistics.record_time(PARSE_CONFIG, config_timer.elapsed() * 1e6);
     }
 
     result->blocks_.push_back(schema_block);
+    g_statistics.record_time(PARSE_BLOCK, timer.elapsed() * 1e3);
   }
 
   // shard details
-  for (auto &block_ds : mc_block_.shard_blocks_) {
+  for (const auto &block_ds : mc_block_.shard_blocks_) {
     auto shard_block = parse_shard_state(mc_block.value(), block_ds.block_data->block_id());
-    result->shard_state_.push_back(shard_block);
+    result->shard_state_.push_back(std::move(shard_block));
   }
 
   result->mc_block_ = mc_block_;
   return td::Status::OK();
 }
 
-schema::MasterchainBlockShard ParseQuery::parse_shard_state(schema::Block mc_block, const ton::BlockIdExt& shard_blk_id) {
+schema::MasterchainBlockShard ParseQuery::parse_shard_state(const schema::Block& mc_block, const ton::BlockIdExt& shard_blk_id) {
   return {mc_block.seqno, mc_block.start_lt, mc_block.gen_utime, shard_blk_id.id.workchain, static_cast<int64_t>(shard_blk_id.id.shard), shard_blk_id.id.seqno};
 }
 
 schema::Block ParseQuery::parse_block(const td::Ref<vm::Cell>& root_cell, const ton::BlockIdExt& blk_id, block::gen::Block::Record& blk, const block::gen::BlockInfo::Record& info, 
-                          const block::gen::BlockExtra::Record& extra, td::optional<schema::Block> &mc_block) {
+                          const block::gen::BlockExtra::Record& extra, const td::optional<schema::Block> &mc_block) {
   schema::Block block;
   block.workchain = blk_id.id.workchain;
   block.shard = static_cast<int64_t>(blk_id.id.shard);
@@ -122,6 +137,25 @@ schema::Block ParseQuery::parse_block(const td::Ref<vm::Cell>& root_cell, const 
     block.prev_blocks.push_back({p.id.workchain, static_cast<int64_t>(p.id.shard), p.id.seqno});
   }
   return block;
+}
+
+td::Result<schema::CurrencyCollection> ParseQuery::parse_currency_collection(td::Ref<vm::CellSlice> csr) {
+  td::RefInt256 grams;
+  std::map<uint32_t, td::RefInt256> extra_currencies;
+  td::Ref<vm::Cell> extra;
+  if (!block::unpack_CurrencyCollection(csr, grams, extra)) {
+    return td::Status::Error(PSLICE() << "Failed to unpack currency collection");
+  }
+  vm::Dictionary extra_currencies_dict{extra, 32};
+  auto it = extra_currencies_dict.begin();
+  while (!it.eof()) {
+    auto id = td::BitArray<32>(it.cur_pos()).to_ulong();
+    auto value_cs = it.cur_value();
+    auto value = block::tlb::t_VarUInteger_32.as_integer(value_cs);
+    extra_currencies[id] = value;
+    ++it;
+  }
+  return schema::CurrencyCollection{std::move(grams), std::move(extra_currencies)};
 }
 
 td::Result<schema::Message> ParseQuery::parse_message(td::Ref<vm::Cell> msg_cell) {
@@ -180,11 +214,11 @@ td::Result<schema::Message> ParseQuery::parse_message(td::Ref<vm::Cell> msg_cell
         return td::Status::Error("Failed to unpack CommonMsgInfo::int_msg_info");
       }
 
-      TRY_RESULT_ASSIGN(msg.value, convert::to_balance(msg_info.value));
+      TRY_RESULT_ASSIGN(msg.value, parse_currency_collection(msg_info.value));
       TRY_RESULT_ASSIGN(msg.source, convert::to_raw_address(msg_info.src));
       TRY_RESULT_ASSIGN(msg.destination, convert::to_raw_address(msg_info.dest));
-      TRY_RESULT_ASSIGN(msg.fwd_fee, convert::to_balance(msg_info.fwd_fee));
-      TRY_RESULT_ASSIGN(msg.ihr_fee, convert::to_balance(msg_info.ihr_fee));
+      msg.fwd_fee = block::tlb::t_Grams.as_integer_skip(msg_info.fwd_fee.write());
+      msg.ihr_fee = block::tlb::t_Grams.as_integer_skip(msg_info.ihr_fee.write());
       msg.created_lt = msg_info.created_lt;
       msg.created_at = msg_info.created_at;
       msg.bounce = msg_info.bounce;
@@ -200,12 +234,7 @@ td::Result<schema::Message> ParseQuery::parse_message(td::Ref<vm::Cell> msg_cell
       
       // msg.source = null, because it is external
       TRY_RESULT_ASSIGN(msg.destination, convert::to_raw_address(msg_info.dest))
-      auto import_fee = convert::to_balance(msg_info.import_fee);
-      if (import_fee.is_error()) {
-        LOG(ERROR) << "Failed to convert import fee to int64";
-      } else {
-        msg.import_fee = import_fee.move_as_ok();
-      }
+      msg.import_fee = block::tlb::t_Grams.as_integer_skip(msg_info.import_fee.write());
 
       return msg;
     }
@@ -231,10 +260,10 @@ td::Result<schema::TrStoragePhase> ParseQuery::parse_tr_storage_phase(vm::CellSl
     return td::Status::Error("Failed to unpack TrStoragePhase");
   }
   schema::TrStoragePhase phase;
-  TRY_RESULT_ASSIGN(phase.storage_fees_collected, convert::to_balance(phase_data.storage_fees_collected));
+  phase.storage_fees_collected = block::tlb::t_Grams.as_integer_skip(phase_data.storage_fees_collected.write());
   auto& storage_fees_due = phase_data.storage_fees_due.write();
   if (storage_fees_due.fetch_ulong(1) == 1) {
-    TRY_RESULT_ASSIGN(phase.storage_fees_due, convert::to_balance(storage_fees_due));
+    phase.storage_fees_due = block::tlb::t_Grams.as_integer_skip(storage_fees_due);
   }
   phase.status_change = static_cast<schema::AccStatusChange>(phase_data.status_change);
   return phase;
@@ -248,9 +277,10 @@ td::Result<schema::TrCreditPhase> ParseQuery::parse_tr_credit_phase(vm::CellSlic
   schema::TrCreditPhase phase;
   auto& due_fees_collected = phase_data.due_fees_collected.write();
   if (due_fees_collected.fetch_ulong(1) == 1) {
-    TRY_RESULT_ASSIGN(phase.due_fees_collected, convert::to_balance(due_fees_collected));
+    phase.due_fees_collected = block::tlb::t_Grams.as_integer_skip(due_fees_collected);
   }
-  TRY_RESULT_ASSIGN(phase.credit, convert::to_balance(phase_data.credit));
+  // TRY_RESULT_ASSIGN(phase.credit, convert::to_balance(phase_data.credit));
+  TRY_RESULT_ASSIGN(phase.credit, parse_currency_collection(phase_data.credit));
   return phase;
 }
 
@@ -265,7 +295,7 @@ td::Result<schema::TrComputePhase> ParseQuery::parse_tr_compute_phase(vm::CellSl
     res.success = compute_vm.success;
     res.msg_state_used = compute_vm.msg_state_used;
     res.account_activated = compute_vm.account_activated;
-    TRY_RESULT_ASSIGN(res.gas_fees, convert::to_balance(compute_vm.gas_fees));
+    res.gas_fees = block::tlb::t_Grams.as_integer_skip(compute_vm.gas_fees.write());
     res.gas_used = block::tlb::t_VarUInteger_7.as_uint(*compute_vm.r1.gas_used);
     res.gas_limit = block::tlb::t_VarUInteger_7.as_uint(*compute_vm.r1.gas_limit);
     auto& gas_credit = compute_vm.r1.gas_credit.write();
@@ -315,11 +345,11 @@ td::Result<schema::TrActionPhase> ParseQuery::parse_tr_action_phase(vm::CellSlic
   res.status_change = static_cast<schema::AccStatusChange>(info.status_change);
   auto& total_fwd_fees = info.total_fwd_fees.write();
   if (total_fwd_fees.fetch_ulong(1) == 1) {
-    TRY_RESULT_ASSIGN(res.total_fwd_fees, convert::to_balance(info.total_fwd_fees));
+    res.total_fwd_fees = block::tlb::t_Grams.as_integer_skip(info.total_fwd_fees.write());
   }
   auto& total_action_fees = info.total_action_fees.write();
   if (total_action_fees.fetch_ulong(1) == 1) {
-    TRY_RESULT_ASSIGN(res.total_action_fees, convert::to_balance(info.total_action_fees));
+    res.total_action_fees = block::tlb::t_Grams.as_integer_skip(info.total_action_fees.write());
   }
   res.result_code = info.result_code;
   auto& result_arg = info.result_arg.write();
@@ -352,7 +382,7 @@ td::Result<schema::TrBouncePhase> ParseQuery::parse_tr_bounce_phase(vm::CellSlic
       }
       schema::TrBouncePhase_nofunds res;
       TRY_RESULT_ASSIGN(res.msg_size, parse_storage_used_short(nofunds.msg_size.write()));
-      TRY_RESULT_ASSIGN(res.req_fwd_fees, convert::to_balance(nofunds.req_fwd_fees));
+      res.req_fwd_fees = block::tlb::t_Grams.as_integer_skip(nofunds.req_fwd_fees.write());
       return res;
     }
     case block::gen::TrBouncePhase::tr_phase_bounce_ok: {
@@ -362,8 +392,8 @@ td::Result<schema::TrBouncePhase> ParseQuery::parse_tr_bounce_phase(vm::CellSlic
       }
       schema::TrBouncePhase_ok res;
       TRY_RESULT_ASSIGN(res.msg_size, parse_storage_used_short(ok.msg_size.write()));
-      TRY_RESULT_ASSIGN(res.msg_fees, convert::to_balance(ok.msg_fees));
-      TRY_RESULT_ASSIGN(res.fwd_fees, convert::to_balance(ok.fwd_fees));
+      res.msg_fees = block::tlb::t_Grams.as_integer_skip(ok.msg_fees.write());
+      res.fwd_fees = block::tlb::t_Grams.as_integer_skip(ok.fwd_fees.write());
       return res;
     }
     default:
@@ -517,7 +547,7 @@ td::Result<schema::TransactionDescr> ParseQuery::process_transaction_descr(vm::C
 
 td::Result<std::vector<schema::Transaction>> ParseQuery::parse_transactions(const ton::BlockIdExt& blk_id, const block::gen::Block::Record &block, 
                               const block::gen::BlockInfo::Record &info, const block::gen::BlockExtra::Record &extra,
-                              std::set<td::Bits256> &addresses) {
+                              std::map<td::Bits256, AccountStateShort> &account_states) {
   std::vector<schema::Transaction> res;
   try {
     vm::AugmentedDictionary acc_dict{vm::load_cell_slice_ref(extra.account_blocks), 256, block::tlb::aug_ShardAccountBlocks};
@@ -573,7 +603,7 @@ td::Result<std::vector<schema::Transaction>> ParseQuery::parse_transactions(cons
         schema_tx.orig_status = static_cast<schema::AccountStatus>(trans.orig_status);
         schema_tx.end_status = static_cast<schema::AccountStatus>(trans.end_status);
 
-        TRY_RESULT_ASSIGN(schema_tx.total_fees, convert::to_balance(trans.total_fees));
+        TRY_RESULT_ASSIGN(schema_tx.total_fees, parse_currency_collection(trans.total_fees));
 
         if (trans.r1.in_msg->prefetch_long(1)) {
           auto msg = trans.r1.in_msg->prefetch_ref();
@@ -600,8 +630,8 @@ td::Result<std::vector<schema::Transaction>> ParseQuery::parse_transactions(cons
         TRY_RESULT_ASSIGN(schema_tx.description, process_transaction_descr(descr_cs));
 
         res.push_back(schema_tx);
-
-        addresses.insert(cur_addr);
+        
+        account_states[cur_addr] = {schema_tx.account_state_hash_after, schema_tx.lt, schema_tx.hash};
       }
     }
   } catch (vm::VmError err) {
@@ -610,50 +640,36 @@ td::Result<std::vector<schema::Transaction>> ParseQuery::parse_transactions(cons
   return res;
 }
 
-td::Status ParseQuery::parse_account_states(const td::Ref<vm::Cell>& block_state_root, std::set<td::Bits256> &addresses) {
-  auto root = block_state_root;
-  block::gen::ShardStateUnsplit::Record sstate;
-  if (!tlb::unpack_cell(block_state_root, sstate)) {
-    return td::Status::Error("Failed to unpack ShardStateUnsplit");
-  }
-  block::gen::ShardIdent::Record shard_id;
-  if (!tlb::csr_unpack(sstate.shard_id, shard_id)) {
-    return td::Status::Error("Failed to unpack ShardIdent");
-  }
-  vm::AugmentedDictionary accounts_dict{vm::load_cell_slice_ref(sstate.accounts), 256, block::tlb::aug_ShardAccounts};
-  for (auto &addr : addresses) {
-    auto shard_account_csr = accounts_dict.lookup(addr);
-    if (shard_account_csr.is_null()) {
-      // account is uninitialized after this block
-      continue;
-    } 
-    block::gen::ShardAccount::Record acc_info;
-    if(!tlb::csr_unpack(std::move(shard_account_csr), acc_info)) {
-      LOG(ERROR) << "Failed to unpack ShardAccount " << addr;
+td::Result<std::vector<schema::AccountState>> ParseQuery::parse_account_states_new(ton::WorkchainId workchain_id, uint32_t gen_utime, std::map<td::Bits256, AccountStateShort> &account_states) {
+  std::vector<schema::AccountState> res;
+  res.reserve(account_states.size());
+  for (auto &[addr, state_short] : account_states) {
+    auto account_cell_r = cell_db_reader_->load_cell(state_short.account_cell_hash.as_slice());
+    if (account_cell_r.is_error()) {
+      LOG(ERROR) << "Failed to load account state cell " << state_short.account_cell_hash.to_hex();
       continue;
     }
-    int account_tag = block::gen::t_Account.get_tag(vm::load_cell_slice(acc_info.account));
+    auto account_cell = account_cell_r.move_as_ok();
+    int account_tag = block::gen::t_Account.get_tag(vm::load_cell_slice(account_cell));
     switch (account_tag) {
     case block::gen::Account::account_none: {
-      auto address = block::StdAddress(shard_id.workchain_id, addr);
-      TRY_RESULT(account, parse_none_account(std::move(acc_info.account), address, sstate.gen_utime, acc_info.last_trans_hash, acc_info.last_trans_lt));
-      result->account_states_.push_back(account);
+      auto address = block::StdAddress(workchain_id, addr);
+      TRY_RESULT(account, parse_none_account(std::move(account_cell), address, gen_utime, state_short.last_transaction_hash, state_short.last_transaction_lt));
+      res.push_back(account);
       break;
     }
     case block::gen::Account::account: {
-      TRY_RESULT(account, parse_account(std::move(acc_info.account), sstate.gen_utime, acc_info.last_trans_hash, acc_info.last_trans_lt));
-      result->account_states_.push_back(account);
+      TRY_RESULT(account, parse_account(std::move(account_cell), gen_utime, state_short.last_transaction_hash, state_short.last_transaction_lt));
+      res.push_back(account);
       break;
     }
     default:
       return td::Status::Error("Unknown account tag");
     }
   }
-  // LOG(DEBUG) << "Parsed " << result->account_states_.size() << " account states";
-  return td::Status::OK();
+  return res;
 }
 
-// td::Result<schema::AccountState> ParseQuery::parse_shard_account(td::Ref<vm::CellSlice> account_csr) 
 
 td::Result<schema::AccountState> ParseQuery::parse_none_account(td::Ref<vm::Cell> account_root, block::StdAddress address, uint32_t gen_utime, td::Bits256 last_trans_hash, uint64_t last_trans_lt) {
   block::gen::Account::Record_account_none account_none;
@@ -665,7 +681,7 @@ td::Result<schema::AccountState> ParseQuery::parse_none_account(td::Ref<vm::Cell
   schema_account.hash = account_root->get_hash().bits();
   schema_account.timestamp = gen_utime;
   schema_account.account_status = "nonexist";
-  schema_account.balance = 0;
+  schema_account.balance = schema::CurrencyCollection{td::RefInt256{true, 0}, {}};
   schema_account.last_trans_hash = last_trans_hash;
   schema_account.last_trans_lt = last_trans_lt;
   return schema_account;
@@ -685,7 +701,7 @@ td::Result<schema::AccountState> ParseQuery::parse_account(td::Ref<vm::Cell> acc
   schema_account.hash = account_root->get_hash().bits();
   TRY_RESULT(account_addr, convert::to_raw_address(account.addr));
   TRY_RESULT_ASSIGN(schema_account.account, block::StdAddress::parse(account_addr));
-  TRY_RESULT_ASSIGN(schema_account.balance, convert::to_balance(storage.balance));
+  TRY_RESULT_ASSIGN(schema_account.balance, parse_currency_collection(storage.balance));
   schema_account.timestamp = gen_utime;
   schema_account.last_trans_hash = last_trans_hash;
   schema_account.last_trans_lt = last_trans_lt;

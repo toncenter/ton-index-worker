@@ -33,6 +33,7 @@ private:
   td::actor::ActorId<ShardStateScanner> shard_state_scanner_;
   Options options_;
   
+  std::unordered_map<block::StdAddress, std::vector<InsertData>, AddressHasher> interfaces_;
   std::vector<InsertData> result_;
 public:
   StateBatchParser(std::vector<std::pair<td::Bits256, block::gen::ShardAccount::Record>> data, ShardStateDataPtr shard_state_data, td::actor::ActorId<ShardStateScanner> shard_state_scanner, Options options)
@@ -40,7 +41,8 @@ public:
   void start_up() override;
   void processing_finished();
 private:
-  void interfaces_detected(std::vector<Detector::DetectedInterface> ifaces);
+  void interfaces_detected(block::StdAddress address, std::vector<typename Detector::DetectedInterface> interfaces, 
+                                    td::Bits256 code_hash, td::Bits256 data_hash, uint64_t last_trans_lt, uint32_t last_trans_now, td::Promise<td::Unit> promise);
   void process_account_states(std::vector<schema::AccountState> account_states);
 };
 
@@ -51,15 +53,14 @@ private:
 
   ShardStateDataPtr shard_state_data_;
   Options options_;
-  std::vector<std::pair<td::Bits256, block::gen::ShardAccount::Record>> queue_;
 
   td::Bits256 cur_addr_{td::Bits256::zero()};
   
   ton::ShardIdFull shard_;
-  bool allow_same{true};
-  bool finished{false};
-  std::atomic_uint32_t in_progress_{0};
-  std::int32_t processed_{0};
+  bool allow_same_{true};
+  bool finished_{false};
+  uint32_t in_progress_{0};
+  uint32_t processed_{0};
 
   std::unordered_map<std::string, int> no_interface_count_;
   std::unordered_set<std::string> code_hashes_to_skip_;
