@@ -2,8 +2,9 @@ FROM ubuntu:22.04 as builder
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
 RUN apt update -y \
     && apt install -y build-essential cmake clang openssl libssl-dev zlib1g-dev \
-                   gperf wget git curl ccache libmicrohttpd-dev \
+                   gperf wget git curl ccache libmicrohttpd-dev liblz4-dev \
                    pkg-config libsecp256k1-dev libsodium-dev python3-dev libpq-dev \
+	           autoconf automake libtool libjemalloc-dev lsb-release software-properties-common gnupg \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 # building
