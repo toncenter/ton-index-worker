@@ -212,6 +212,7 @@ struct Transaction {
   td::Bits256 prev_trans_hash;
   uint64_t prev_trans_lt;
   uint32_t now;
+  uint32_t mc_seqno;
 
   AccountStatus orig_status;
   AccountStatus end_status;
@@ -412,6 +413,7 @@ struct JettonTransfer {
   uint64_t transaction_lt;
   uint32_t transaction_now;
   bool transaction_aborted;
+  uint32_t mc_seqno;
   uint64_t query_id;
   td::RefInt256 amount;
   std::string source;
@@ -430,6 +432,7 @@ struct JettonBurn {
   uint64_t transaction_lt;
   uint32_t transaction_now;
   bool transaction_aborted;
+  uint32_t mc_seqno;
   uint64_t query_id;
   std::string owner;
   std::string jetton_wallet;
@@ -504,6 +507,7 @@ struct NFTTransfer {
   uint64_t transaction_lt;
   uint32_t transaction_now;
   bool transaction_aborted;
+  uint32_t mc_seqno;
   uint64_t query_id;
   block::StdAddress nft_item;
   td::RefInt256 nft_item_index;  // ignore

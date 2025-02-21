@@ -219,7 +219,7 @@ CTestTestfile.cmake
 _deps
 
 # build
-[Bb][Uu][Ii][Ll][Dd]
+[Bb][Uu][Ii][Ll][Dd]*
 sandbox/
 
 # vs code

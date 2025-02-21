@@ -821,7 +821,7 @@ void InsertBatchPostgres::insert_transactions(pqxx::work &txn, bool with_copy) {
 }
 
 void InsertBatchPostgres::insert_messages(pqxx::work &txn, bool with_copy) {
-  std::initializer_list<std::string_view> columns = {"tx_hash", "tx_lt", "msg_hash", "direction", "trace_id", "source", "destination",
+  std::initializer_list<std::string_view> columns = {"tx_hash", "tx_lt", "mc_seqno", "msg_hash", "direction", "trace_id", "source", "destination",
                                                 "value", "value_extra_currencies", "fwd_fee", "ihr_fee", "created_lt", "created_at",
                                                 "opcode", "ihr_disabled", "bounce", "bounced", "import_fee", "body_hash", "init_state_hash"};
   PopulateTableStream stream(txn, "messages", columns, 1000, with_copy);
@@ -844,6 +844,7 @@ void InsertBatchPostgres::insert_messages(pqxx::work &txn, bool with_copy) {
     auto tuple = std::make_tuple(
       tx.hash,
       tx.lt,
+      tx.mc_seqno,
       msg.hash,
       direction,
       msg.trace_id,
@@ -1339,7 +1340,7 @@ std::string InsertBatchPostgres::insert_getgems_nft_auctions(pqxx::work &txn) {
 
 void InsertBatchPostgres::insert_jetton_transfers(pqxx::work &txn, bool with_copy) {
   std::initializer_list<std::string_view> columns = {
-    "tx_hash", "tx_lt", "tx_now", "tx_aborted", "query_id", "amount", "source", "destination", "jetton_wallet_address",
+    "tx_hash", "tx_lt", "tx_now", "tx_aborted", "mc_seqno", "query_id", "amount", "source", "destination", "jetton_wallet_address",
     "jetton_master_address", "response_destination", "custom_payload", "forward_ton_amount", "forward_payload", "trace_id"
   };
   PopulateTableStream stream(txn, "jetton_transfers", columns, 1000, with_copy);
@@ -1360,6 +1361,7 @@ void InsertBatchPostgres::insert_jetton_transfers(pqxx::work &txn, bool with_cop
         transfer.transaction_lt,
         transfer.transaction_now,
         transfer.transaction_aborted,
+        transfer.mc_seqno,
         transfer.query_id,
         transfer.amount,
         transfer.source,
@@ -1380,7 +1382,7 @@ void InsertBatchPostgres::insert_jetton_transfers(pqxx::work &txn, bool with_cop
 
 void InsertBatchPostgres::insert_jetton_burns(pqxx::work &txn, bool with_copy) {
   std::initializer_list<std::string_view> columns = {
-    "tx_hash", "tx_lt", "tx_now", "tx_aborted", "query_id", "owner", "jetton_wallet_address", "jetton_master_address",
+    "tx_hash", "tx_lt", "tx_now", "tx_aborted", "mc_seqno", "query_id", "owner", "jetton_wallet_address", "jetton_master_address",
     "amount", "response_destination", "custom_payload", "trace_id"
   };
   PopulateTableStream stream(txn, "jetton_burns", columns, 1000, with_copy);
@@ -1398,6 +1400,7 @@ void InsertBatchPostgres::insert_jetton_burns(pqxx::work &txn, bool with_copy) {
         burn.transaction_lt,
         burn.transaction_now,
         burn.transaction_aborted,
+        burn.mc_seqno,
         burn.query_id,
         burn.owner,
         burn.jetton_wallet,
@@ -1416,7 +1419,7 @@ void InsertBatchPostgres::insert_jetton_burns(pqxx::work &txn, bool with_copy) {
 
 void InsertBatchPostgres::insert_nft_transfers(pqxx::work &txn, bool with_copy) {
   std::initializer_list<std::string_view> columns = {
-    "tx_hash", "tx_lt", "tx_now", "tx_aborted", "query_id", "nft_item_address", "nft_item_index", "nft_collection_address",
+    "tx_hash", "tx_lt", "tx_now", "tx_aborted", "mc_seqno", "query_id", "nft_item_address", "nft_item_index", "nft_collection_address",
     "old_owner", "new_owner", "response_destination", "custom_payload", "forward_amount", "forward_payload", "trace_id"
   };
   PopulateTableStream stream(txn, "nft_transfers", columns, 1000, with_copy);
@@ -1437,6 +1440,7 @@ void InsertBatchPostgres::insert_nft_transfers(pqxx::work &txn, bool with_copy) 
         transfer.transaction_lt,
         transfer.transaction_now,
         transfer.transaction_aborted,
+        transfer.mc_seqno,
         transfer.query_id,
         transfer.nft_item,
         transfer.nft_item_index,
@@ -1706,6 +1710,7 @@ void InsertManagerPostgres::start_up() {
       "create table if not exists messages ("
       "tx_hash tonhash, "
       "tx_lt bigint, "
+      "mc_seqno integer, "
       "msg_hash tonhash, "
       "direction msg_direction, "
       "trace_id tonhash, "
@@ -1798,6 +1803,7 @@ void InsertManagerPostgres::start_up() {
       "tx_lt bigint not null, "
       "tx_now integer not null, "
       "tx_aborted boolean not null, "
+      "mc_seqno integer, "
       "query_id numeric, "
       "nft_item_address tonaddr, "
       "nft_item_index numeric, "
@@ -1849,6 +1855,7 @@ void InsertManagerPostgres::start_up() {
       "tx_lt bigint not null, "
       "tx_now integer not null, "
       "tx_aborted boolean not null, "
+      "mc_seqno integer, "
       "query_id numeric, "
       "owner tonaddr, "
       "jetton_wallet_address tonaddr, "
@@ -1867,6 +1874,7 @@ void InsertManagerPostgres::start_up() {
       "tx_lt bigint not null, "
       "tx_now integer not null, "
       "tx_aborted boolean not null, "
+      "mc_seqno integer, "
       "query_id numeric, "
       "amount numeric, "
       "source tonaddr, "
