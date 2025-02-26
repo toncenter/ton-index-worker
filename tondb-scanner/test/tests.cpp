@@ -14,7 +14,7 @@
 #include "vm/cells/Cell.h"
 #include "convert-utils.h"
 #include "InterfaceDetectors.hpp"
-
+#include "IndexData.h"
 
 
 TEST(convert, to_raw_address) {
@@ -50,27 +50,53 @@ TEST(convert, to_std_address_with_anycast) {
     ASSERT_EQ(block::StdAddress(0, addr), std_address_serialized.move_as_ok());
 }
 
-TEST(TonDbScanner, JettonWalletDetector) {
+TEST(TonDbScanner, ParseBurnWithCustomPayload) {
   td::actor::Scheduler scheduler({1});
   auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get()->stop(); });
 
   block::StdAddress addr(std::string("EQDKC7jQ_tIJuYyrWfI4FIAN-hFHakG3GrATpOiqBVtsGOd5"));
-  auto code_cell = vm::std_boc_deserialize(td::base64_decode(td::Slice("te6cckECEgEAAzEAART/APSkE/S88sgLAQIBYgIDAgLLBAUAG6D2BdqJofQB9IH0gahhAgEgBgcCAWILDAIBSAgJAfH4Hpn/0AfSAQ+AH2omh9AH0gfSBqGCibUKkVY4L5cWCUYX/5cWEqGiE4KhAJqgoB5CgCfQEsZ4sA54tmZJFkZYCJegB6AGWAZJB8gDg6ZGWBZQPl/+ToAn0gegIY/QAQa6ThAHlxYjvADGRlgqgEZ4s4fQEL5bWJ5kCgC3QgxwCSXwTgAdDTAwFxsJUTXwPwEuD6QPpAMfoAMXHXIfoAMfoAMALTHyGCEA+KfqW6lTE0WfAP4CGCEBeNRRm6ljFERAPwEOA1ghBZXwe8upNZ8BHgXwSED/LwgAEV+kQwcLry4U2ACughAXjUUZyMsfGcs/UAf6AiLPFlAGzxYl+gJQA88WyVAFzCORcpFx4lAIqBOgggiYloCqAIIImJaAoKAUvPLixQTJgED7ABAjyFAE+gJYzxYBzxbMye1UAgEgDQ4AgUgCDXIe1E0PoA+kD6QNQwBNMfIYIQF41FGboCghB73ZfeuhKx8uLF0z8x+gAwE6BQI8hQBPoCWM8WAc8WzMntVIA/c7UTQ+gD6QPpA1DAI0z/6AFFRoAX6QPpAU1vHBVRzbXBUIBNUFAPIUAT6AljPFgHPFszJIsjLARL0APQAywDJ+QBwdMjLAsoHy//J0FANxwUcsfLiwwr6AFGooYIImJaAggiYloAStgihggiYloCgGKEn4w8l1wsBwwAjgDxARAOM7UTQ+gD6QPpA1DAH0z/6APpA9AQwUWKhUkrHBfLiwSjC//LiwoIImJaAqgAXoBe88uLDghB73ZfeyMsfyz9QBfoCIc8WUAPPFvQAyXGAGMjLBSTPFnD6AstqzMmAQPsAQBPIUAT6AljPFgHPFszJ7VSAAcFJ5oBihghBzYtCcyMsfUjDLP1j6AlAHzxZQB88WyXGAEMjLBSTPFlAG+gIVy2oUzMlx+wAQJBAjAA4QSRA4N18EAHbCALCOIYIQ1TJ223CAEMjLBVAIzxZQBPoCFstqEssfEss/yXL7AJM1bCHiA8hQBPoCWM8WAc8WzMntVLp4DOo=")).move_as_ok()).move_as_ok();
-  auto data_cell = vm::std_boc_deserialize(td::base64_decode(td::Slice("te6cckECEwEAA3sAAY0xKctoASFZDXpO6Q6ZgXHilrBvG9KSTVMUJk1CMXwYaoCc9JirAC61IQRl0/la95t27xhIpjxZt32vl1QQVF2UgTNuvD18YAEBFP8A9KQT9LzyyAsCAgFiAwQCAssFBgAboPYF2omh9AH0gfSBqGECASAHCAIBYgwNAgFICQoB8fgemf/QB9IBD4AfaiaH0AfSB9IGoYKJtQqRVjgvlxYJRhf/lxYSoaITgqEAmqCgHkKAJ9ASxniwDni2ZkkWRlgIl6AHoAZYBkkHyAODpkZYFlA+X/5OgCfSB6Ahj9ABBrpOEAeXFiO8AMZGWCqARnizh9AQvltYnmQLALdCDHAJJfBOAB0NMDAXGwlRNfA/AS4PpA+kAx+gAxcdch+gAx+gAwAtMfIYIQD4p+pbqVMTRZ8A/gIYIQF41FGbqWMUREA/AQ4DWCEFlfB7y6k1nwEeBfBIQP8vCAARX6RDBwuvLhTYAK6CEBeNRRnIyx8Zyz9QB/oCIs8WUAbPFiX6AlADzxbJUAXMI5FykXHiUAioE6CCCJiWgKoAggiYloCgoBS88uLFBMmAQPsAECPIUAT6AljPFgHPFszJ7VQCASAODwCBSAINch7UTQ+gD6QPpA1DAE0x8hghAXjUUZugKCEHvdl966ErHy4sXTPzH6ADAToFAjyFAE+gJYzxYBzxbMye1UgD9ztRND6APpA+kDUMAjTP/oAUVGgBfpA+kBTW8cFVHNtcFQgE1QUA8hQBPoCWM8WAc8WzMkiyMsBEvQA9ADLAMn5AHB0yMsCygfL/8nQUA3HBRyx8uLDCvoAUaihggiYloCCCJiWgBK2CKGCCJiWgKAYoSfjDyXXCwHDACOAQERIA4ztRND6APpA+kDUMAfTP/oA+kD0BDBRYqFSSscF8uLBKML/8uLCggiYloCqABegF7zy4sOCEHvdl97Iyx/LP1AF+gIhzxZQA88W9ADJcYAYyMsFJM8WcPoCy2rMyYBA+wBAE8hQBPoCWM8WAc8WzMntVIABwUnmgGKGCEHNi0JzIyx9SMMs/WPoCUAfPFlAHzxbJcYAQyMsFJM8WUAb6AhXLahTMyXH7ABAkECMADhBJEDg3XwQAdsIAsI4hghDVMnbbcIAQyMsFUAjPFlAE+gIWy2oSyx8Syz/JcvsAkzVsIeIDyFAE+gJYzxYBzxbMye1U8/HTGA==")).move_as_ok()).move_as_ok();
-  auto P = td::PromiseCreator::lambda([](td::Result<JettonWalletData> R) {
-    CHECK(R.is_ok());
-    LOG(INFO) << R.move_as_ok().jetton;
-  });
+  // message payload for tx xiOZW3mVbHkCtgLxQqXVAg4DIgxrTE3j9lHw6H3P/Yg=, correct layout
+  auto message_payload = vm::load_cell_slice_ref(vm::std_boc_deserialize(td::base64_decode(
+    td::Slice("te6cckEBAgEAOQABZllfB7xUbeTvz/ieq1AezMgZqAEPdvSWQKq0LY5UE5PZzQsh8ADqxh1H03XLREV/xoLz4QEAAaAxtO6I")).move_as_ok()).move_as_ok());
+
+  auto transaction = schema::Transaction();
+  transaction.account = block::StdAddress(std::string("EQCk6s76oduqQH_3Y3O7fxjWVoUXtD3Ev6-NbHjjDmfG1drE")); // jetton wallet
+  transaction.in_msg = std::make_optional(schema::Message());
+  transaction.in_msg->source = "0:87BB7A4B20555A16C72A09C9ECE68590F80075630EA3E9BAE5A222BFE34179F0"; // owner
+
+  td::actor::ActorId<InsertManagerInterface> insert_manager;
+  td::actor::ActorOwn<JettonWalletDetector> jetton_wallet_detector;
+  td::actor::ActorOwn<InterfaceManager> interface_manager;
+  td::actor::ActorOwn<JettonMasterDetector> jetton_master_detector;
+
+  // prepare jetton metadata
+  std::unordered_map<std::string, JettonWalletData> cache;
+  JettonWalletData jetton_master;
+  jetton_master.jetton = "0:BDF3FA8098D129B54B4F73B5BAC5D1E1FD91EB054169C3916DFC8CCD536D1000";
+  cache.emplace(std::string("0:A4EACEFAA1DBAA407FF76373BB7F18D6568517B43DC4BFAF8D6C78E30E67C6D5"), jetton_master);
+
   scheduler.run_in_context([&] { 
-    td::actor::ActorId<InsertManagerInterface> insert_manager;
-    // auto interface_manager = td::actor::create_actor<InterfaceManager>("interface_manager");
-    // auto jetton_master_detector = td::actor::create_actor<JettonMasterDetector>("jetton_master_detector");
-    // auto jetton_wallet_detector = td::actor::create_actor<JettonWalletDetector>("jetton_wallet_detector", jetton_master_detector.get(), interface_manager.get(), insert_manager);
-    // td::actor::send_closure(jetton_wallet_detector, &JettonWalletDetector::detect, block::StdAddress(), code_cell, data_cell, 0, std::move(P)); 
+    interface_manager = td::actor::create_actor<InterfaceManager>("interface_manager", insert_manager);
+    jetton_master_detector = td::actor::create_actor<JettonMasterDetector>("jetton_master_detector", interface_manager.get(), insert_manager);
+    
+    jetton_wallet_detector = td::actor::create_actor<JettonWalletDetector>("jetton_wallet_detector",
+      jetton_master_detector.get(), interface_manager.get(), insert_manager, cache);
+    
+        auto P = td::PromiseCreator::lambda([&transaction, &jetton_master](td::Result<JettonBurn> R) {
+        CHECK(R.is_ok());
+        auto burn = R.move_as_ok();
+        ASSERT_EQ(transaction.in_msg->source.value(), burn.owner);
+        ASSERT_EQ(convert::to_raw_address(transaction.account), burn.jetton_wallet);
+        ASSERT_EQ(jetton_master.jetton, burn.jetton_master);
+        ASSERT_EQ(6083770390284902059, burn.query_id);
+        CHECK(td::BigIntG<257>(8267792794) == **burn.amount.get());
+      });
+       td::actor::send_closure(jetton_wallet_detector, &JettonWalletDetector::parse_burn, transaction, message_payload, std::move(P));   
     watcher.reset();
   });
 
-  scheduler.run();
+  scheduler.run(10);
+  scheduler.stop();
   
 }
 
