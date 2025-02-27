@@ -29,8 +29,10 @@ transfer_notification#7362d09c query_id:uint64 amount:(VarUInteger 16)
 excesses#d53276db query_id:uint64 = InternalMsgBody;
 
 burn#595f07bc query_id:uint64 amount:(VarUInteger 16)
-       response_destination:MsgAddress custom_payload:(Maybe ^Cell)
+       response_destination:MsgAddress custom_payload_cell:Cell
        = InternalMsgBody;
+// Note that in TEP-74 custom_payload is (Maybe ^Cell), but reference implementation allows to ignore it
+// So we use Cell instead of Maybe ^Cell and parse Maybe in the code
 
 transfer_nft#5fcc3d14 query_id:uint64 new_owner:MsgAddress response_destination:MsgAddress
           custom_payload:(Maybe ^Cell) forward_amount:(VarUInteger 16) 

@@ -149,9 +149,7 @@ public:
       return response_destination.move_as_error_prefix("Failed to unpack burn response destination: ");
     }
     burn.response_destination = response_destination.move_as_ok();
-    if (!burn_record.custom_payload.write().fetch_maybe_ref(burn.custom_payload)) {
-      return td::Status::Error("Failed to fetch custom payload");
-    }
+    burn_record.custom_payload_cell.write().prefetch_maybe_ref(burn.custom_payload);
 
     return burn;
   }

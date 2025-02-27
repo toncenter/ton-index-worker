@@ -586,10 +586,8 @@ public:
       return;
     }
     burn.response_destination = response_destination.move_as_ok();
-    if (!burn_record.custom_payload.write().fetch_maybe_ref(burn.custom_payload)) {
-      promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSING_ERROR, "Failed to fetch custom payload"));
-      return;
-    }
+    // since some messages don't have maybe ref cell at all we can ignore error here
+    burn_record.custom_payload_cell.write().fetch_maybe_ref(burn.custom_payload);
 
     promise.set_value(std::move(burn));
   }
