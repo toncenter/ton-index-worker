@@ -101,6 +101,63 @@ TEST(TonDbScanner, JettonWalletDetector_parse_burn) {
   scheduler.stop(); 
 }
 
+TEST(TonDbScanner, JettonWalletDetector_parse_burn_without_custom_payload) {
+  /**
+   * According to the TEP-74 (https://github.com/ton-blockchain/TEPs/blob/master/text/0074-jettons-standard.md) burn message should have the following layout:
+   * burn#595f07bc query_id:uint64 amount:(VarUInteger 16)
+   *           response_destination:MsgAddress custom_payload:(Maybe ^Cell)
+   *           = InternalMsgBody;
+   * In fact, the Maybe flag could be omitted at all and the referrence implementation ignores it (https://github.com/ton-blockchain/token-contract/blob/main/ft/jetton-wallet.fc#L170-L171)
+   * So parser should be able to handle such cases since it is handled on the contract side.
+   */
+  td::actor::Scheduler scheduler({1});
+  auto watcher = td::create_shared_destructor([] { td::actor::SchedulerContext::get()->stop(); });
+
+  // message payload for tx Z2AuVEPZgtkFeLtneWg4i39xiOkEIDD9Lrhvz66amZU=
+  auto message_payload = vm::load_cell_slice_ref(vm::std_boc_deserialize(td::base64_decode(
+    td::Slice("te6cckEBAQEAFAAAI1lfB7wAAAAAAAAAAFGSVNOAAqKoE5Y=")).move_as_ok()).move_as_ok());
+
+  auto transaction = schema::Transaction();
+  transaction.account = block::StdAddress(std::string("EQCvlBsnlt-qAsiKtb9cb0IwFraA0bdTmj4K6bKbNQNjy1Cc")); // jetton wallet
+  transaction.in_msg = std::make_optional(schema::Message());
+  transaction.in_msg->source = "0:893B73E987E771F0E28326962C9373E4A02D2C90553D5E219383758159AAA7A6"; // owner
+
+  td::actor::ActorId<InsertManagerInterface> insert_manager;
+  td::actor::ActorOwn<JettonWalletDetector> jetton_wallet_detector;
+  td::actor::ActorOwn<InterfaceManager> interface_manager;
+  td::actor::ActorOwn<JettonMasterDetector> jetton_master_detector;
+
+  // prepare jetton metadata
+  std::unordered_map<std::string, JettonWalletData> cache;
+  JettonWalletData jetton_master;
+  jetton_master.jetton = "0:2DCBB7322C88C5ED4F8AD15806FE0724B1300AB482E46C908D8CF62567CE5C09";
+  cache.emplace(std::string("0:AF941B2796DFAA02C88AB5BF5C6F423016B680D1B7539A3E0AE9B29B350363CB"), jetton_master);
+
+  scheduler.run_in_context([&] {
+    interface_manager = td::actor::create_actor<InterfaceManager>("interface_manager", insert_manager);
+    jetton_master_detector = td::actor::create_actor<JettonMasterDetector>("jetton_master_detector", interface_manager.get(), insert_manager);
+
+    jetton_wallet_detector = td::actor::create_actor<JettonWalletDetector>("jetton_wallet_detector",
+      jetton_master_detector.get(), interface_manager.get(), insert_manager, cache);
+
+    auto P = td::PromiseCreator::lambda([&transaction, &jetton_master](td::Result<JettonBurn> R) {
+      CHECK(R.is_ok());
+      auto burn = R.move_as_ok();
+      ASSERT_EQ(transaction.in_msg->source.value(), burn.owner);
+      ASSERT_EQ(convert::to_raw_address(transaction.account), burn.jetton_wallet);
+      ASSERT_EQ(jetton_master.jetton, burn.jetton_master);
+      ASSERT_EQ(0, burn.query_id);
+      ASSERT_TRUE(burn.custom_payload.is_null());
+      CHECK(td::BigIntG<257>(108000000000) == **burn.amount.get());
+    });
+    td::actor::send_closure(jetton_wallet_detector, &JettonWalletDetector::parse_burn, transaction, message_payload, std::move(P));
+    watcher.reset();
+  });
+
+  scheduler.run(10);
+  scheduler.stop(); 
+}
+
 
 TEST(TonDbScanner, JettonWalletDetector) {
   td::actor::Scheduler scheduler({1});
