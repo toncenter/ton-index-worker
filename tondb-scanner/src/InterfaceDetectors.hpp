@@ -552,8 +552,18 @@ public:
   void parse_burn_impl(JettonWalletData contract_data, schema::Transaction transaction, td::Ref<vm::CellSlice> cs, td::Promise<JettonBurn> promise) {
     tokens::gen::InternalMsgBody::Record_burn burn_record;
     if (!tlb::csr_unpack_inexact(cs, burn_record)) {
-      promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSING_ERROR, "Failed to unpack burn"));
-      return;
+      // handle stTON burn message format
+      // burn#595f07bc query_id:uint64 jetton_amount:Coins = InternalMsgBody;
+      if (contract_data.jetton == "0:CD872FA7C5816052ACDF5332260443FAEC9AACC8C21CCA4D92E7F47034D11892") {
+        cs.write().skip_first(32); // opcode
+        if (!cs.write().fetch_ulong_bool(64, burn_record.query_id) || !tokens::gen::t_VarUInteger_16.fetch_to(cs.write(), burn_record.amount)) {
+          promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSING_ERROR, "Failed to unpack stTON burn"));
+          return;
+        }
+      } else {
+        promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSING_ERROR, "Failed to unpack burn"));
+        return;
+      }
     }
 
     JettonBurn burn;
@@ -580,14 +590,20 @@ public:
       promise.set_error(td::Status::Error(ErrorCode::EVENT_PARSING_ERROR, "Failed to unpack burn amount"));
       return;
     }
-    auto response_destination = convert::to_raw_address(burn_record.response_destination);
-    if (response_destination.is_error()) {
-      promise.set_error(response_destination.move_as_error());
-      return;
+    if (burn_record.response_destination.not_null()) {
+      auto response_destination = convert::to_raw_address(burn_record.response_destination);
+      if (response_destination.is_error()) {
+        promise.set_error(response_destination.move_as_error());
+        return;
+      }
+      burn.response_destination = response_destination.move_as_ok();
+    } else {
+      burn.response_destination = "addr_none";
     }
-    burn.response_destination = response_destination.move_as_ok();
     // since some messages don't have maybe ref cell at all we can ignore error here
-    burn_record.custom_payload_cell.write().fetch_maybe_ref(burn.custom_payload);
+    if (burn_record.custom_payload_cell.not_null()) {
+      burn_record.custom_payload_cell.write().fetch_maybe_ref(burn.custom_payload);
+    }
 
     promise.set_value(std::move(burn));
   }
