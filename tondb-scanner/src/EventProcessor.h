@@ -119,7 +119,16 @@ public:
   td::Result<JettonBurn> parse_jetton_burn(const JettonWalletDataV2& jetton_wallet, const schema::Transaction& transaction, td::Ref<vm::CellSlice> in_msg_body_cs) {
     tokens::gen::InternalMsgBody::Record_burn burn_record;
     if (!tlb::csr_unpack_inexact(in_msg_body_cs, burn_record)) {
-      return td::Status::Error("Failed to unpack burn");
+      // handle stTON burn message format
+      // burn#595f07bc query_id:uint64 jetton_amount:Coins = InternalMsgBody;
+      if (jetton_wallet.jetton == block::StdAddress(std::string("EQDNhy-nxYFgUqzfUzImBEP67JqsyMIcyk2S5_RwNNEYku0k"))) {
+        in_msg_body_cs.write().skip_first(32); // opcode
+        if (!in_msg_body_cs.write().fetch_ulong_bool(64, burn_record.query_id) || !tokens::gen::t_VarUInteger_16.fetch_to(in_msg_body_cs.write(), burn_record.amount)) {
+          return td::Status::Error("Failed to unpack stTON burn");;
+        }
+      } else {
+        return td::Status::Error("Failed to unpack burn");;
+      }
     }
 
     JettonBurn burn;
@@ -144,12 +153,18 @@ public:
     if (burn.amount.is_null()) {
       return td::Status::Error("Failed to unpack burn amount");
     }
-    auto response_destination = convert::to_raw_address(burn_record.response_destination);
-    if (response_destination.is_error()) {
-      return response_destination.move_as_error_prefix("Failed to unpack burn response destination: ");
+    if (burn_record.response_destination.not_null()) {
+      auto response_destination = convert::to_raw_address(burn_record.response_destination);
+      if (response_destination.is_error()) {
+        return response_destination.move_as_error_prefix("Failed to unpack burn response destination: ");
+      }
+      burn.response_destination = response_destination.move_as_ok();
+    } else {
+      burn.response_destination = "addr_none";
     }
-    burn.response_destination = response_destination.move_as_ok();
-    burn_record.custom_payload_cell.write().prefetch_maybe_ref(burn.custom_payload);
+    if (burn_record.custom_payload_cell.not_null()) {
+      burn_record.custom_payload_cell.write().prefetch_maybe_ref(burn.custom_payload);
+    }
 
     return burn;
   }
