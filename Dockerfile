@@ -26,7 +26,7 @@ COPY ton-integrity-checker/ /app/ton-integrity-checker/
 COPY ton-smc-scanner/ /app/ton-smc-scanner/
 COPY ton-trace-emulator/ /app/ton-trace-emulator/
 COPY tondb-scanner/ /app/tondb-scanner/
-COPY celldb-migrate/ /app/celldb-migrate/
+COPY sandbox-cpp/ /app/sandbox-cpp/
 COPY CMakeLists.txt /app/
 
 WORKDIR /app/build
@@ -36,7 +36,7 @@ RUN ninja -j$(nproc)
 FROM ubuntu:22.04
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
 RUN apt update -y \
-    && apt install -y dnsutils libpq-dev libsecp256k1-dev libsodium-dev \
+    && apt install -y dnsutils libpq-dev libsecp256k1-dev libsodium-dev libatomic1 \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 COPY scripts/entrypoint.sh /entrypoint.sh
