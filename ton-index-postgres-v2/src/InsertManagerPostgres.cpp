@@ -752,8 +752,16 @@ std::string InsertBatchPostgres::insert_transactions(pqxx::work &txn) {
                 << TO_SQL_BOOL(v->credit_first) << ","
                 << "NULL,"
                 << "NULL,";
-          store_storage_ph(v->storage_ph);
-          store_credit_ph(v->credit_ph);
+          if (v->storage_ph) {
+              store_storage_ph(v->storage_ph.value());
+          } else {
+              store_empty_storage_ph();
+          }
+          if (v->credit_ph) {
+              store_credit_ph(v->credit_ph.value());
+          } else {
+              store_empty_credit_ph();
+          }
           store_compute_ph(v->compute_ph);
           if (v->action) {
             store_action_ph(v->action.value());
