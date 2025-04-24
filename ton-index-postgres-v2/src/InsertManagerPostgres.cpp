@@ -1153,8 +1153,7 @@ std::string InsertBatchPostgres::insert_latest_account_states(pqxx::work &txn) {
         << "data_hash = EXCLUDED.data_hash, "
         << "code_hash = EXCLUDED.code_hash, "
         << "data_boc = EXCLUDED.data_boc, "
-        << "code_boc = EXCLUDED.code_boc "
-        << "WHERE latest_account_states.last_trans_lt < EXCLUDED.last_trans_lt;\n";
+        << "code_boc = EXCLUDED.code_boc;\n";
   // LOG(INFO) << "Latest account states query size: " << double(query.str().length()) / 1024 / 1024;
   return query.str();
 }
@@ -1214,7 +1213,7 @@ std::string InsertBatchPostgres::insert_jetton_masters(pqxx::work &txn) {
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
         << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
-        << "data_hash = EXCLUDED.data_hash WHERE jetton_masters.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
+        << "data_hash = EXCLUDED.data_hash;\n";
   return query.str();
 }
 
@@ -1271,7 +1270,7 @@ std::string InsertBatchPostgres::insert_jetton_wallets(pqxx::work &txn) {
         << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
         << "data_hash = EXCLUDED.data_hash, "
-        << "mintless_is_claimed = EXCLUDED.mintless_is_claimed WHERE jetton_wallets.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
+        << "mintless_is_claimed = EXCLUDED.mintless_is_claimed;\n";
 
   if (!known_mintless_masters.empty()) {
     bool is_first = true;
@@ -1340,7 +1339,7 @@ std::string InsertBatchPostgres::insert_nft_collections(pqxx::work &txn) {
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
         << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
-        << "data_hash = EXCLUDED.data_hash WHERE nft_collections.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
+        << "data_hash = EXCLUDED.data_hash;\n";
   return query.str();
 }
 
@@ -1402,7 +1401,7 @@ std::string InsertBatchPostgres::insert_nft_items(pqxx::work &txn) {
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
         
         << "code_hash = EXCLUDED.code_hash, "
-        << "data_hash = EXCLUDED.data_hash WHERE nft_items.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
+        << "data_hash = EXCLUDED.data_hash;\n";
   return query.str();
 }
 
@@ -1470,7 +1469,7 @@ std::string InsertBatchPostgres::insert_getgems_nft_sales(pqxx::work &txn) {
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
         << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
-        << "data_hash = EXCLUDED.data_hash WHERE getgems_nft_sales.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
+        << "data_hash = EXCLUDED.data_hash;\n";
   return query.str();
 }
 
@@ -1560,7 +1559,7 @@ std::string InsertBatchPostgres::insert_getgems_nft_auctions(pqxx::work &txn) {
         << "last_transaction_lt = EXCLUDED.last_transaction_lt, "
         << (datalake_mode_ ? "last_tx_now = EXCLUDED.last_tx_now, " : "")
         << "code_hash = EXCLUDED.code_hash, " 
-        << "data_hash = EXCLUDED.data_hash WHERE getgems_nft_auctions.last_transaction_lt < EXCLUDED.last_transaction_lt;\n";
+        << "data_hash = EXCLUDED.data_hash;\n";
   return query.str();
 }
 
