@@ -36,7 +36,7 @@ RUN ninja -j$(nproc)
 FROM ubuntu:22.04
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
 RUN apt update -y \
-    && apt install -y dnsutils libpq-dev libsecp256k1-dev libsodium-dev libatomic1 \
+    && apt install -y dnsutils libpq-dev libsecp256k1-dev libsodium-dev libatomic1 postgresql-client \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 COPY scripts/entrypoint.sh /entrypoint.sh
