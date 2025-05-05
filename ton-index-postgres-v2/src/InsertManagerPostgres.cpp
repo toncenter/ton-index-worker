@@ -127,13 +127,10 @@ void InsertBatchPostgres::alarm() {
     }
     promise_.set_value(td::Unit());
     stop();
-    return;
   } catch (const std::exception &e) {
     LOG(ERROR) << "Error inserting to PG: " << e.what();
-    promise_.set_error(td::Status::Error(ErrorCode::DB_ERROR, "Failed to insert to PG"));
-    return;
+    alarm_timestamp() = td::Timestamp::in(10.0);
   }
-  alarm_timestamp() = td::Timestamp::in(10.0);
 }
 
 
