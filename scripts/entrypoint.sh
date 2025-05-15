@@ -26,7 +26,11 @@ echo "Postgres host: $POSTGRES_HOST (ip: $POSTGRES_HOST_IP)"
 ulimit -n 1000000
 printenv
 echo "Running binary ${TON_WORKER_BINARY:-ton-index-postgres}"
-TON_WORKER_FROM=$(PGPASSWORD=$POSTGRES_PASSWORD psql -t -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DBNAME -c "select seqno - 1000 from blocks where workchain =-1 and shard = -9223372036854775808 order by  seqno desc limit 1;")
+
+if [[ -z "$TON_WORKER_FROM" ]]; then
+    echo "TON_WORKER_FROM not set, getting from postgres"
+    TON_WORKER_FROM=$(PGPASSWORD=$POSTGRES_PASSWORD psql -t -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DBNAME -c "select seqno - 1000 from blocks where workchain =-1 and shard = -9223372036854775808 order by  seqno desc limit 1;")
+fi
 echo "TON_WORKER_FROM: $TON_WORKER_FROM"
 
 ${TON_WORKER_BINARY:-ton-index-postgres} --host $POSTGRES_HOST_IP \
