@@ -127,8 +127,17 @@ void InsertBatchPostgres::alarm() {
     }
     promise_.set_value(td::Unit());
     stop();
+    connection_errors_ = 0;
   } catch (const std::exception &e) {
     LOG(ERROR) << "Error inserting to PG: " << e.what();
+    if (e.what() && std::string(e.what()).find("Connection timed out") != std::string::npos) {
+      connection_errors_ += 1;
+      if (connection_errors_ > 30) {
+        LOG(ERROR) << "Too many connection errors, exiting";
+        exit(1);
+      }
+    }
+    
     alarm_timestamp() = td::Timestamp::in(10.0);
   }
 }
