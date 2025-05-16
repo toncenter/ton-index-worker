@@ -55,7 +55,7 @@ private:
   std::string stringify(schema::AccStatusChange acc_status_change);
   std::string stringify(schema::AccountStatus account_status);
   std::string jsonify(const schema::SplitMergeInfo& info);
-  std::string jsonify(const schema::StorageUsedShort& s);
+  std::string jsonify(const schema::StorageUsed& s);
   std::string jsonify(const schema::TrStoragePhase& s);
   std::string jsonify(const schema::TrCreditPhase& c);
   std::string jsonify(const schema::TrActionPhase& action);
