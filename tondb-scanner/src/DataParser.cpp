@@ -292,12 +292,12 @@ td::Result<schema::TrComputePhase> ParseQuery::parse_tr_compute_phase(vm::CellSl
   return td::Status::OK();
 }
 
-td::Result<schema::StorageUsedShort> ParseQuery::parse_storage_used_short(vm::CellSlice& cs) {
-  block::gen::StorageUsedShort::Record info;
+td::Result<schema::StorageUsed> ParseQuery::parse_storage_used_short(vm::CellSlice& cs) {
+  block::gen::StorageUsed::Record info;
   if (!tlb::unpack(cs, info)) {
     return td::Status::Error("Error unpacking StorageUsedShort");
   }
-  schema::StorageUsedShort res;
+  schema::StorageUsed res;
   res.bits = block::tlb::t_VarUInteger_7.as_uint(*info.bits);
   res.cells = block::tlb::t_VarUInteger_7.as_uint(*info.cells);
   return res;

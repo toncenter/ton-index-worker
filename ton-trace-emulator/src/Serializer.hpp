@@ -132,7 +132,7 @@ struct TrComputePhase_vm {
 using TrComputePhase = std::variant<TrComputePhase_skipped, 
                                     TrComputePhase_vm>;
 
-struct StorageUsedShort {
+struct StorageUsed {
   uint64_t cells;
   uint64_t bits;
 
@@ -153,7 +153,7 @@ struct TrActionPhase {
   uint16_t skipped_actions;
   uint16_t msgs_created;
   td::Bits256 action_list_hash;
-  StorageUsedShort tot_msg_size;
+  StorageUsed tot_msg_size;
 
   MSGPACK_DEFINE(success, valid, no_funds, status_change, total_fwd_fees, total_action_fees, result_code, result_arg, tot_actions, spec_actions, skipped_actions, msgs_created, action_list_hash, tot_msg_size);
 };
@@ -165,14 +165,14 @@ struct TrBouncePhase_negfunds {
 };
 
 struct TrBouncePhase_nofunds {
-  StorageUsedShort msg_size;
+  StorageUsed msg_size;
   uint64_t req_fwd_fees;
 
   MSGPACK_DEFINE(msg_size, req_fwd_fees);
 };
 
 struct TrBouncePhase_ok {
-  StorageUsedShort msg_size;
+  StorageUsed msg_size;
   uint64_t msg_fees;
   uint64_t fwd_fees;
 
@@ -424,12 +424,12 @@ td::Result<TrComputePhase> parse_tr_compute_phase(vm::CellSlice& cs) {
   return td::Status::OK();
 }
 
-td::Result<StorageUsedShort> parse_storage_used_short(vm::CellSlice& cs) {
-  block::gen::StorageUsedShort::Record info;
+td::Result<StorageUsed> parse_storage_used(vm::CellSlice& cs) {
+  block::gen::StorageUsed::Record info;
   if (!tlb::unpack(cs, info)) {
-    return td::Status::Error("Error unpacking StorageUsedShort");
+    return td::Status::Error("Error unpacking StorageUsed");
   }
-  StorageUsedShort res;
+  StorageUsed res;
   res.bits = block::tlb::t_VarUInteger_7.as_uint(*info.bits);
   res.cells = block::tlb::t_VarUInteger_7.as_uint(*info.cells);
   return res;
@@ -463,7 +463,7 @@ td::Result<TrActionPhase> parse_tr_action_phase(vm::CellSlice& cs) {
   res.skipped_actions = info.skipped_actions;
   res.msgs_created = info.msgs_created;
   res.action_list_hash = info.action_list_hash;
-  TRY_RESULT_ASSIGN(res.tot_msg_size, parse_storage_used_short(info.tot_msg_size.write()));
+  TRY_RESULT_ASSIGN(res.tot_msg_size, parse_storage_used(info.tot_msg_size.write()));
   return res;
 }
 
@@ -483,7 +483,7 @@ td::Result<TrBouncePhase> parse_tr_bounce_phase(vm::CellSlice& cs) {
         return td::Status::Error("Error unpacking tr_phase_bounce_nofunds");
       }
       TrBouncePhase_nofunds res;
-      TRY_RESULT_ASSIGN(res.msg_size, parse_storage_used_short(nofunds.msg_size.write()));
+      TRY_RESULT_ASSIGN(res.msg_size, parse_storage_used(nofunds.msg_size.write()));
       TRY_RESULT_ASSIGN(res.req_fwd_fees, convert::to_balance(nofunds.req_fwd_fees));
       return res;
     }
@@ -493,7 +493,7 @@ td::Result<TrBouncePhase> parse_tr_bounce_phase(vm::CellSlice& cs) {
         return td::Status::Error("Error unpacking tr_phase_bounce_ok");
       }
       TrBouncePhase_ok res;
-      TRY_RESULT_ASSIGN(res.msg_size, parse_storage_used_short(ok.msg_size.write()));
+      TRY_RESULT_ASSIGN(res.msg_size, parse_storage_used(ok.msg_size.write()));
       TRY_RESULT_ASSIGN(res.msg_fees, convert::to_balance(ok.msg_fees));
       TRY_RESULT_ASSIGN(res.fwd_fees, convert::to_balance(ok.fwd_fees));
       return res;

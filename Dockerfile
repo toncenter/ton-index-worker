@@ -31,8 +31,8 @@ RUN apt update -y \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 COPY scripts/entrypoint.sh /entrypoint.sh
-COPY --from=builder /app/build/external/libpqxx/src/libpqxx.so /usr/lib/libpqxx.so
-COPY --from=builder /app/build/external/libpqxx/src/libpqxx-*.so /usr/lib/
+COPY --from=builder /app/build/external/libpqxx/src/libpqxx.a /usr/lib/libpqxx.a
+COPY --from=builder /app/build/external/libpqxx/src/libpqxx-*.a /usr/lib/
 COPY --from=builder /app/build/ton-index-postgres/ton-index-postgres /usr/bin/ton-index-postgres
 COPY --from=builder /app/build/ton-index-postgres-v2/ton-index-postgres-v2 /usr/bin/ton-index-postgres-v2
 COPY --from=builder /app/build/ton-index-clickhouse/ton-index-clickhouse /usr/bin/ton-index-clickhouse
