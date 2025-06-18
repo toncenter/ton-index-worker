@@ -19,8 +19,9 @@ td::Result<std::vector<vm::StackEntry>> execute_smc_method(const block::StdAddre
   if (!res.success) {
     return td::Status::Error(method_id + " failed");
   }
-  if (res.stack->depth() != expected_types.size()) {
-    return td::Status::Error(method_id + " unexpected result stack depth");
+  // some contracts return additional stack entries, so don't check exact size match
+  if (res.stack->depth() < expected_types.size()) {
+    return td::Status::Error(method_id + " less than expected result stack depth");
   }
   auto stack = res.stack->extract_contents();
   
