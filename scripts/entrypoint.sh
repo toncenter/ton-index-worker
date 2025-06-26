@@ -16,7 +16,7 @@ else
     exit 1
 fi
 
-POSTGRES_HOST_IP=$(dig +short ${POSTGRES_HOST})
+POSTGRES_HOST_IP=$(getent ahosts ${POSTGRES_HOST} | grep STREAM | awk '{print $1}')
 if [[ -z "$POSTGRES_HOST_IP" ]]; then
     POSTGRES_HOST_IP=$POSTGRES_HOST
     echo "PostgreSQL host IP: $POSTGRES_HOST_IP"
