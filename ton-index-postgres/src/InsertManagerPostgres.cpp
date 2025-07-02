@@ -200,7 +200,7 @@ std::string InsertBatchPostgres::jsonify(const schema::SplitMergeInfo& info) {
 }
 
 
-std::string InsertBatchPostgres::jsonify(const schema::StorageUsedShort& s) {
+std::string InsertBatchPostgres::jsonify(const schema::StorageUsed& s) {
   auto jb = td::JsonBuilder();
   auto c = jb.enter_object();
   c("cells", std::to_string(s.cells));
