@@ -1,7 +1,7 @@
-FROM ubuntu:22.04 as builder
+FROM ubuntu:24.04 as builder
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
 RUN apt update -y \
-    && apt install -y build-essential cmake clang openssl libssl-dev zlib1g-dev \
+    && apt install -y build-essential cmake clang-20 openssl libssl-dev zlib1g-dev \
                    gperf wget git curl ccache libmicrohttpd-dev liblz4-dev \
                    pkg-config libsecp256k1-dev libsodium-dev python3-dev libpq-dev \
 		   autoconf automake libhiredis-dev libtool libjemalloc-dev lsb-release software-properties-common gnupg \
@@ -21,10 +21,12 @@ COPY tondb-scanner/ /app/tondb-scanner/
 COPY CMakeLists.txt /app/
 
 WORKDIR /app/build
+ENV CC=clang-20
+ENV CXX=clang++-20
 RUN cmake -DCMAKE_BUILD_TYPE=Release ..
-RUN make -j$(nproc)
+RUN touch /app/suppression_mappings.txt && make -j$(nproc)
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
 RUN apt update -y \
     && apt install -y dnsutils libpq-dev libsecp256k1-dev libsodium-dev \
