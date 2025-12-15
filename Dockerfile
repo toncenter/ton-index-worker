@@ -26,7 +26,7 @@ COPY CMakeLists.txt /app/
 
 WORKDIR /app/build
 RUN cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSKIP_TESTS=On ..
-RUN ninja -j$(nproc)
+RUN touch /app/suppression_mappings.txt && make -j$(nproc)
 
 FROM ubuntu:24.04
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
