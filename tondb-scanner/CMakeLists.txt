@@ -27,9 +27,7 @@ target_link_directories(tondb-scanner
     PUBLIC external/libpqxx
 )
 target_compile_features(tondb-scanner PRIVATE cxx_std_20)
-target_link_libraries(tondb-scanner overlay tdutils tdactor adnl tl_api dht
-        catchain validatorsession validator-disk ton_validator validator-disk smc-envelope
-        pqxx)
+target_link_libraries(tondb-scanner PUBLIC validator-db validator ton_validator tddb smc-envelope msgpack-cxx)
 
 set(TLB_TOKENS
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tokens.cpp
