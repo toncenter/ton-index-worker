@@ -4,7 +4,7 @@ RUN apt update -y \
     && apt install -y build-essential cmake clang-20 openssl libssl-dev zlib1g-dev \
                    gperf wget git curl ccache libmicrohttpd-dev liblz4-dev \
                    pkg-config libsecp256k1-dev libsodium-dev python3-dev libpq-dev \
-                   autoconf libtool libhiredis-dev lsb-release software-properties-common gnupg ninja-build \
+                   autoconf automake libtool libhiredis-dev libjemalloc-dev lsb-release software-properties-common gnupg ninja-build \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 ENV CC=clang-20
@@ -25,7 +25,7 @@ COPY sandbox-cpp/ /app/sandbox-cpp/
 COPY CMakeLists.txt /app/
 
 WORKDIR /app/build
-RUN cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSKIP_TESTS=On ..
+RUN cmake -DCMAKE_BUILD_TYPE=Release -DSKIP_TESTS=On ..
 RUN touch /app/suppression_mappings.txt && make -j$(nproc)
 
 FROM ubuntu:24.04
