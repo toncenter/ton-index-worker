@@ -1,19 +1,14 @@
-FROM ubuntu:22.04 as builder
+FROM ubuntu:24.04 as builder
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
 RUN apt update -y \
-    && apt install -y build-essential cmake clang openssl libssl-dev zlib1g-dev \
+    && apt install -y build-essential cmake clang-20 openssl libssl-dev zlib1g-dev \
                    gperf wget git curl ccache libmicrohttpd-dev liblz4-dev \
                    pkg-config libsecp256k1-dev libsodium-dev python3-dev libpq-dev \
-                   autoconf libtool libhiredis-dev lsb-release software-properties-common gnupg ninja-build \
+                   autoconf automake libtool libhiredis-dev libjemalloc-dev lsb-release software-properties-common gnupg ninja-build \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
-RUN wget https://apt.llvm.org/llvm.sh && \
-    chmod +x llvm.sh && \
-    ./llvm.sh 16 all && \
-    rm -rf /var/lib/apt/lists/*
-
-ENV CC=/usr/bin/clang-16
-ENV CXX=/usr/bin/clang++-16
+ENV CC=clang-20
+ENV CXX=clang++-20
 ENV CCACHE_DISABLE=1
 
 # building
@@ -30,10 +25,10 @@ COPY sandbox-cpp/ /app/sandbox-cpp/
 COPY CMakeLists.txt /app/
 
 WORKDIR /app/build
-RUN cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSKIP_TESTS=On ..
-RUN ninja -j$(nproc)
+RUN cmake -DCMAKE_BUILD_TYPE=Release -DSKIP_TESTS=On ..
+RUN touch /app/suppression_mappings.txt && make -j$(nproc)
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get update && apt-get -y install tzdata && rm -rf /var/lib/{apt,dpkg,cache,log}/
 RUN apt update -y \
     && apt install -y dnsutils libpq-dev libsecp256k1-dev libsodium-dev libatomic1 postgresql-client \
